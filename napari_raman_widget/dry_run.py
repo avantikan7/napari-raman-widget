@@ -31,6 +31,7 @@ def _plane_to_targets(plane, masks, params):
     return droplet_targets(
         masks, density=params["density"], margin=params["margin"], image=plane,
         min_rel_intensity=params["min_rel_intensity"],
+        max_area=params["max_area"],
     )
 
 
@@ -58,10 +59,20 @@ def build_dry_run_controls(widget):
 
     widget.dry_rel_input = QDoubleSpinBox()
     widget.dry_rel_input.setRange(0.0, 1.0); widget.dry_rel_input.setSingleStep(0.05)
-    widget.dry_rel_input.setValue(0.3)
+    widget.dry_rel_input.setValue(0.0)
     widget.dry_rel_input.setToolTip(
         "Drop objects dimmer than this fraction of the brightest droplet")
     row("Min relative intensity:", widget.dry_rel_input)
+    widget.dry_maxarea_input = QSpinBox()
+    widget.dry_maxarea_input.setRange(0, 10_000_000)
+    widget.dry_maxarea_input.setSingleStep(500)
+    widget.dry_maxarea_input.setValue(8000)
+    widget.dry_maxarea_input.setSpecialValueText("No limit")
+    widget.dry_maxarea_input.setToolTip(
+        "Skip objects larger than this many pixels (0 = no limit). Large hazy\n"
+        "blobs are usually clusters of unresolved small droplets. Depends on\n"
+        "magnification and image size; tune it on your own images.")
+    row("Max droplet area (px):", widget.dry_maxarea_input)
     widget.dry_density_input = QSpinBox()
     widget.dry_density_input.setRange(1, 500); widget.dry_density_input.setValue(6)
     row("Grid spacing (px):", widget.dry_density_input)
@@ -151,7 +162,8 @@ def _segment(widget, current_only):
     diameter = _cellpose_diameter(widget.sel_cell_diameter_input.value())
     params = dict(density=int(widget.dry_density_input.value()),
                   margin=float(widget.dry_margin_input.value()),
-                  min_rel_intensity=float(widget.dry_rel_input.value()))
+                  min_rel_intensity=float(widget.dry_rel_input.value()),
+                  max_area=int(widget.dry_maxarea_input.value()) or None)
     zs = ([int(widget.viewer.dims.current_step[0])] if current_only and stack.shape[0] > 1
           else list(range(stack.shape[0])))
     zs = [min(max(z, 0), stack.shape[0] - 1) for z in zs]
