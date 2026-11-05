@@ -40,8 +40,7 @@ def build_dry_run_controls(widget):
     box = make_collapsible("Dry run: droplet segmentation (no hardware)", expanded=False)
     lay = QVBoxLayout()
     lay.addWidget(QLabel(
-        "Uses the Cellpose model and diameter chosen in\n"
-        "'Automated cell selection' (set diameter to 0 for the model default)."))
+        "Uses the Cellpose model chosen in 'Automated cell selection'."))
 
     open_row = QHBoxLayout()
     widget.dry_open_btn = QPushButton("Open image / z-stack...")
@@ -63,10 +62,18 @@ def build_dry_run_controls(widget):
     widget.dry_rel_input.setToolTip(
         "Drop objects dimmer than this fraction of the brightest droplet")
     row("Min relative intensity:", widget.dry_rel_input)
+    widget.dry_diameter_input = QDoubleSpinBox()
+    widget.dry_diameter_input.setRange(0.0, 500.0)
+    widget.dry_diameter_input.setValue(0.0)
+    widget.dry_diameter_input.setSpecialValueText("Auto (model default)")
+    widget.dry_diameter_input.setToolTip(
+        "Droplet diameter in pixels. Leave on Auto: on BODIPY images a fixed\n"
+        "diameter such as 15 found only 2 of 9 droplets.")
+    row("Droplet diameter (px):", widget.dry_diameter_input)
     widget.dry_maxarea_input = QSpinBox()
     widget.dry_maxarea_input.setRange(0, 10_000_000)
     widget.dry_maxarea_input.setSingleStep(500)
-    widget.dry_maxarea_input.setValue(8000)
+    widget.dry_maxarea_input.setValue(7500)
     widget.dry_maxarea_input.setSpecialValueText("No limit")
     widget.dry_maxarea_input.setToolTip(
         "Skip objects larger than this many pixels (0 = no limit). Large hazy\n"
@@ -159,7 +166,7 @@ def _segment(widget, current_only):
         return
     from .widget import _cellpose_diameter
 
-    diameter = _cellpose_diameter(widget.sel_cell_diameter_input.value())
+    diameter = _cellpose_diameter(widget.dry_diameter_input.value())
     params = dict(density=int(widget.dry_density_input.value()),
                   margin=float(widget.dry_margin_input.value()),
                   min_rel_intensity=float(widget.dry_rel_input.value()),
