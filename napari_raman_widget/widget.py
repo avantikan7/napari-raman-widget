@@ -1285,6 +1285,9 @@ class HardwareWidget(QWidget):
         self.apply_mda_positions_btn = QPushButton("Apply prepared positions to MDA")
         self.apply_mda_positions_btn.clicked.connect(lambda: apply_prepared_positions(self))
         sel_layout.addWidget(self.apply_mda_positions_btn)
+        from .dry_run import build_dry_run_controls
+        self.dry_run_box = build_dry_run_controls(self)
+        outer.addWidget(self.dry_run_box)
         mda_box = make_collapsible("Pixel-to-stage calibration", expanded=False)
         mda_layout = QVBoxLayout()
 
@@ -1339,7 +1342,7 @@ class HardwareWidget(QWidget):
 
         # make_collapsible re-shows ALL descendants on expand, which clobbers
         # our conditional field hiding -- re-apply it after any box expands.
-        for _box in (calib_box, scan_box, self.sel_box, mda_box):
+        for _box in (calib_box, scan_box, self.sel_box, self.dry_run_box, mda_box):
             _box.toggled.connect(lambda checked: self._reapply_toggles())
 
         # from .chat_panel import ChatPanel
