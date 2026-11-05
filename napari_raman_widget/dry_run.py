@@ -70,6 +70,14 @@ def build_dry_run_controls(widget):
         "Droplet diameter in pixels. Leave on Auto: on BODIPY images a fixed\n"
         "diameter such as 15 found only 2 of 9 droplets.")
     row("Droplet diameter (px):", widget.dry_diameter_input)
+    widget.dry_flow_input = QDoubleSpinBox()
+    widget.dry_flow_input.setRange(0.0, 3.0)
+    widget.dry_flow_input.setSingleStep(0.1)
+    widget.dry_flow_input.setValue(1.0)
+    widget.dry_flow_input.setToolTip(
+        "Cellpose flow threshold. Higher keeps more (and less perfect) masks.\n"
+        "On BODIPY, 0.6 found 14 of 42 bright puncta; 1.0 found 37 of 42.")
+    row("Detection sensitivity (flow):", widget.dry_flow_input)
     widget.dry_maxarea_input = QSpinBox()
     widget.dry_maxarea_input.setRange(0, 10_000_000)
     widget.dry_maxarea_input.setSingleStep(500)
@@ -169,6 +177,7 @@ def _segment(widget, current_only):
     diameter = _cellpose_diameter(widget.dry_diameter_input.value())
     params = dict(density=int(widget.dry_density_input.value()),
                   margin=float(widget.dry_margin_input.value()),
+                  flow=float(widget.dry_flow_input.value()),
                   min_rel_intensity=float(widget.dry_rel_input.value()),
                   max_area=int(widget.dry_maxarea_input.value()) or None)
     zs = ([int(widget.viewer.dims.current_step[0])] if current_only and stack.shape[0] > 1
@@ -199,7 +208,7 @@ def _segment(widget, current_only):
                 continue
             norm = np.clip((plane - lo) / (hi - lo), 0, 1)
             masks = eval_cellpose_model(
-                model, norm, diameter=diameter, flow_threshold=0.6,
+                model, norm, diameter=diameter, flow_threshold=params["flow"],
                 cellprob_threshold=-2, normalize=False)
             masks = masks[0] if isinstance(masks, tuple) else masks
             targets = _plane_to_targets(plane, masks, params)
