@@ -1,4 +1,4 @@
-# Neuron imaging
+# Lipid drop imaging
 
 This component runs in the `confocal_control_gui_cellpose4` conda environment.
 Use launch_napari.bat, or launch_cellpose4_napari.bat in the parent workspace.

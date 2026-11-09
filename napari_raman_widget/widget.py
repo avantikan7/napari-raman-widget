@@ -1288,6 +1288,9 @@ class HardwareWidget(QWidget):
         from .dry_run import build_dry_run_controls
         self.dry_run_box = build_dry_run_controls(self)
         outer.addWidget(self.dry_run_box)
+        from .dish_panel import build_dish_controls
+        self.dish_box = build_dish_controls(self)
+        outer.addWidget(self.dish_box)
         mda_box = make_collapsible("Pixel-to-stage calibration", expanded=False)
         mda_layout = QVBoxLayout()
 
@@ -1342,7 +1345,7 @@ class HardwareWidget(QWidget):
 
         # make_collapsible re-shows ALL descendants on expand, which clobbers
         # our conditional field hiding -- re-apply it after any box expands.
-        for _box in (calib_box, scan_box, self.sel_box, self.dry_run_box, mda_box):
+        for _box in (calib_box, scan_box, self.sel_box, self.dry_run_box, self.dish_box, mda_box):
             _box.toggled.connect(lambda checked: self._reapply_toggles())
 
         # from .chat_panel import ChatPanel

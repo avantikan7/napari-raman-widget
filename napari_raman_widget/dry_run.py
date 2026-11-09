@@ -52,6 +52,11 @@ def build_dry_run_controls(widget):
     open_row.addWidget(QLabel("Channel:"))
     open_row.addWidget(widget.dry_channel_input)
     lay.addLayout(open_row)
+    widget.dry_layer_btn = QPushButton("Use selected image layer")
+    widget.dry_layer_btn.setToolTip(
+        "Segment an image layer already in the viewer, such as a snapped camera\n"
+        "frame. Aim points are only valid for the image they were computed on.")
+    lay.addWidget(widget.dry_layer_btn)
 
     def row(label, w):
         r = QHBoxLayout(); r.addWidget(QLabel(label)); r.addWidget(w); lay.addLayout(r)
@@ -105,6 +110,23 @@ def build_dry_run_controls(widget):
     lay.addLayout(btn_row)
     widget.dry_export_btn = QPushButton("Export targets (CSV)")
     lay.addWidget(widget.dry_export_btn)
+    lay.addWidget(QLabel(
+        "Send to acquisition: run 'Manual selection' first, then pick the\n"
+        "cell layer. Targets must come from the camera's own image."))
+    widget.dry_grid_check = QCheckBox("Include grid points (not just aim points)")
+    widget.dry_grid_check.setChecked(True)
+    lay.addWidget(widget.dry_grid_check)
+    widget.dry_best_check = QCheckBox("Best plane per droplet only")
+    widget.dry_best_check.setChecked(True)
+    lay.addWidget(widget.dry_best_check)
+    pos_row = QHBoxLayout()
+    pos_row.addWidget(QLabel("Stage position index:"))
+    widget.dry_pos_input = QSpinBox()
+    widget.dry_pos_input.setRange(0, 100000)
+    pos_row.addWidget(widget.dry_pos_input)
+    lay.addLayout(pos_row)
+    widget.dry_send_btn = QPushButton("Send targets to selected cell layer")
+    lay.addWidget(widget.dry_send_btn)
     widget.dry_status = QLabel("")
     widget.dry_status.setWordWrap(True)
     lay.addWidget(widget.dry_status)
@@ -115,6 +137,8 @@ def build_dry_run_controls(widget):
     widget.dry_plane_btn.clicked.connect(lambda _=False: _segment(widget, current_only=True))
     widget.dry_all_btn.clicked.connect(lambda _=False: _segment(widget, current_only=False))
     widget.dry_export_btn.clicked.connect(lambda _=False: _export(widget))
+    widget.dry_layer_btn.clicked.connect(lambda _=False: _use_layer(widget))
+    widget.dry_send_btn.clicked.connect(lambda _=False: _send(widget))
     return box
 
 
@@ -145,7 +169,12 @@ def _open(widget):
     except Exception as exc:
         _say(widget, f"could not open image -- {exc}")
         return
-    stack = stack.astype(np.float32)
+    _load_stack(widget, stack, Path(path).name)
+
+
+def _load_stack(widget, stack, label):
+    """Show ``stack`` (Z, Y, X) in the viewer with empty result layers."""
+    stack = np.asarray(stack).astype(np.float32)
     for name in (IMAGE, LABELS, AIM, GRID):
         if name in widget.viewer.layers:
             widget.viewer.layers.remove(name)
@@ -156,8 +185,26 @@ def _open(widget):
     widget.viewer.add_labels(np.zeros(stack.shape, np.uint32), name=LABELS)
     widget.viewer.add_points(np.empty((0, 3)), name=AIM, size=8, face_color="red", ndim=3)
     widget.viewer.add_points(np.empty((0, 3)), name=GRID, size=2, face_color="yellow", ndim=3)
-    _say(widget, f"loaded {Path(path).name}: {stack.shape[0]} plane(s), "
+    _say(widget, f"loaded {label}: {stack.shape[0]} plane(s), "
                  f"{stack.shape[1]}x{stack.shape[2]} px")
+
+
+def _use_layer(widget):
+    """Segment an image already in the viewer (e.g. a snapped camera frame)."""
+    from napari.layers import Image
+
+    layer = widget.viewer.layers.selection.active
+    if not isinstance(layer, Image) or layer.name == IMAGE or layer.rgb:
+        _say(widget, "select a grayscale image layer in the layer list first "
+                     "(not the dry-run copy)")
+        return
+    data = np.asarray(layer.data)
+    if data.ndim == 2:
+        data = data[None]
+    elif data.ndim != 3:
+        _say(widget, f"layer '{layer.name}' has shape {data.shape}; need 2D or Z-Y-X")
+        return
+    _load_stack(widget, data, f"layer '{layer.name}'")
 
 
 def _segment(widget, current_only):
@@ -190,7 +237,7 @@ def _segment(widget, current_only):
         widget.viewer.layers[name].data = np.empty((0, 3))
     widget._dry["targets"] = {}
     widget._dry["raw_masks"] = {}
-    for b in (widget.dry_plane_btn, widget.dry_all_btn, widget.dry_open_btn):
+    for b in (widget.dry_plane_btn, widget.dry_all_btn, widget.dry_open_btn, widget.dry_layer_btn):
         b.setEnabled(False)
 
     @thread_worker
@@ -230,12 +277,12 @@ def _segment(widget, current_only):
             labels_layer.refresh()
         total = sum(len(v) for v in widget._dry["targets"].values())
         _say(widget, f"done: {total} droplet(s) over {len(zs)} plane(s)")
-        for b in (widget.dry_plane_btn, widget.dry_all_btn, widget.dry_open_btn):
+        for b in (widget.dry_plane_btn, widget.dry_all_btn, widget.dry_open_btn, widget.dry_layer_btn):
             b.setEnabled(True)
 
     def failed(exc):
         _say(widget, f"segmentation failed -- {exc}")
-        for b in (widget.dry_plane_btn, widget.dry_all_btn, widget.dry_open_btn):
+        for b in (widget.dry_plane_btn, widget.dry_all_btn, widget.dry_open_btn, widget.dry_layer_btn):
             b.setEnabled(True)
 
     def on_yield(msg):
@@ -305,3 +352,41 @@ def _export(widget):
                     rows += 1
     note = "" if have_volts else " (no transformer loaded, so voltages are blank)"
     _say(widget, f"exported {rows} points to {Path(path).name}{note}")
+
+
+def _send(widget):
+    """Add the droplet aim/grid points to the selected cell layer.
+
+    Mirrors what the widget does after automated selection: one row
+    ``[t, position, c, z, y, x]`` per point, broadcast over t, c and z. The
+    cell layer comes from 'Manual selection', so everything after this
+    (apply prepared positions, MDA, Raman acquisition) is the existing path.
+    """
+    from raman_mda_engine.aiming.droplets import droplet_point_rows
+
+    targets = widget._dry.get("targets") or {}
+    if not any(targets.values()):
+        _say(widget, "nothing to send -- segment first")
+        return
+    if getattr(widget, "selection_results", None) is None:
+        _say(widget, "run 'Manual selection' first to create the cell layer")
+        return
+    source = widget._selected_cell_source()
+    if source is None:
+        _say(widget, "select a cell layer in 'Cell selection layers'")
+        return
+    rows = droplet_point_rows(
+        targets, include_grid=widget.dry_grid_check.isChecked(),
+        best_plane_only=widget.dry_best_check.isChecked())
+    pos = int(widget.dry_pos_input.value())
+    pts = [[0, pos, 0, 0, y, x] for _z, _d, _kind, y, x in rows]
+    transformer = getattr(source, "transformer", None)
+    # The DAQ needs at least 2 samples per channel; the automated path adds a
+    # repeated point when the aiming pattern does not multiply points.
+    if len(pts) == 1 and getattr(transformer, "multiplier", 2) <= 1:
+        pts.append(list(pts[0]))
+    for row in pts:
+        source._points.add(row)
+    n_drop = len({d for _z, d, _k, _y, _x in rows})
+    _say(widget, f"sent {len(pts)} point(s) for {n_drop} droplet(s) to position {pos}; "
+                 "apply prepared positions to MDA when ready")
