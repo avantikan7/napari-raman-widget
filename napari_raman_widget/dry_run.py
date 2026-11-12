@@ -82,12 +82,62 @@ def _watershed_masks(plane, background_sigma=12.0, min_distance=3, threshold_sca
 
 
 def build_dry_run_controls(widget):
-    """Create the panel, attach it to ``widget`` and return its group box."""
-    box = make_collapsible("Dry run: droplet segmentation (no hardware)", expanded=False)
+    """Create the live-lipolysis targeting loop and attach it to the widget."""
+    from qtpy.QtWidgets import QGroupBox
+
+    box = make_collapsible(
+        "Live lipolysis loop: image -> track -> Raman", expanded=False
+    )
     lay = QVBoxLayout()
-    lay.addWidget(QLabel(
-        "Compare Cellpose with a BODIPY-specific threshold + watershed baseline. "
-        "Choose custom BODIPY weights when available."))
+
+    intro = QLabel(
+        "Biology layer for live adipocyte experiments. This panel decides which "
+        "lipid droplets to revisit; Jeff's Autofocus and MDA panels remain the "
+        "authoritative hardware/acquisition controls."
+    )
+    intro.setWordWrap(True)
+    intro.setToolTip(
+        "Loop: image -> segment -> review -> set baseline -> re-image -> "
+        "register field -> match droplets -> rank biological change -> "
+        "autofocus -> validate Raman mapping -> prepare MDA -> Run in Jeff's MDA panel."
+    )
+    lay.addWidget(intro)
+
+    widget.dry_state_label = QLabel()
+    widget.dry_state_label.setWordWrap(True)
+    widget.dry_state_label.setStyleSheet(
+        "QLabel { border: 1px solid palette(mid); padding: 5px; "
+        "font-family: monospace; }"
+    )
+    widget.dry_state_label.setToolTip(
+        "Live state summary. A new image, segmentation, curation change, or "
+        "adaptive re-ranking invalidates the old galvo validation and prepared MDA."
+    )
+    lay.addWidget(widget.dry_state_label)
+
+    def step(title, summary, tooltip):
+        group = QGroupBox(title)
+        glay = QVBoxLayout(group)
+        note = QLabel(summary)
+        note.setWordWrap(True)
+        note.setToolTip(tooltip)
+        glay.addWidget(note)
+        lay.addWidget(group)
+        return glay
+
+    def row(layout, label, control):
+        r = QHBoxLayout()
+        r.addWidget(QLabel(label))
+        r.addWidget(control)
+        layout.addLayout(r)
+
+    seg = step(
+        "1 - Image + segment lipid droplets",
+        "Load the current BODIPY frame or Z-stack, then segment candidate droplets.",
+        "For repeated lipolysis imaging, keep acquisition settings comparable across "
+        "timepoints. Segmentation creates candidates only; Raman targets are chosen "
+        "after QC in Step 2.",
+    )
 
     engine_row = QHBoxLayout()
     engine_row.addWidget(QLabel("Segmentation engine:"))
@@ -95,7 +145,7 @@ def build_dry_run_controls(widget):
     widget.dry_engine_combo.addItem("BODIPY threshold + watershed", "watershed")
     widget.dry_engine_combo.addItem("Cellpose", "cellpose")
     engine_row.addWidget(widget.dry_engine_combo, 1)
-    lay.addLayout(engine_row)
+    seg.addLayout(engine_row)
 
     from .widget import _cellpose_model_names
 
@@ -104,137 +154,132 @@ def build_dry_run_controls(widget):
     widget.dry_cellpose_combo = QComboBox()
     for model_name in _cellpose_model_names():
         widget.dry_cellpose_combo.addItem(model_name, model_name)
-    current_model = widget.sel_cellpose_combo.currentData() or widget.sel_cellpose_combo.currentText()
+    current_model = (
+        widget.sel_cellpose_combo.currentData()
+        or widget.sel_cellpose_combo.currentText()
+    )
     current_index = widget.dry_cellpose_combo.findData(current_model)
     if current_index >= 0:
         widget.dry_cellpose_combo.setCurrentIndex(current_index)
     widget.dry_cellpose_browse = QPushButton("...")
     widget.dry_cellpose_browse.setFixedWidth(30)
-    widget.dry_cellpose_browse.setToolTip("Select user-trained BODIPY Cellpose weights")
     widget.dry_cellpose_browse.clicked.connect(
         lambda _checked=False: widget.browse_cellpose_model(widget.dry_cellpose_combo)
     )
     model_row.addWidget(widget.dry_cellpose_combo, 1)
     model_row.addWidget(widget.dry_cellpose_browse)
-    lay.addLayout(model_row)
+    seg.addLayout(model_row)
 
-    ws_bg_row = QHBoxLayout()
-    ws_bg_row.addWidget(QLabel("Watershed background sigma (px):"))
     widget.dry_ws_bg_input = QDoubleSpinBox()
     widget.dry_ws_bg_input.setRange(1.0, 100.0)
     widget.dry_ws_bg_input.setValue(12.0)
     widget.dry_ws_bg_input.setSingleStep(1.0)
-    ws_bg_row.addWidget(widget.dry_ws_bg_input)
-    lay.addLayout(ws_bg_row)
+    row(seg, "Watershed background sigma (px):", widget.dry_ws_bg_input)
 
-    ws_md_row = QHBoxLayout()
-    ws_md_row.addWidget(QLabel("Watershed min peak distance (px):"))
     widget.dry_ws_distance_input = QSpinBox()
     widget.dry_ws_distance_input.setRange(1, 100)
     widget.dry_ws_distance_input.setValue(4)
-    ws_md_row.addWidget(widget.dry_ws_distance_input)
-    lay.addLayout(ws_md_row)
+    row(seg, "Watershed min peak distance (px):", widget.dry_ws_distance_input)
 
-    ws_thr_row = QHBoxLayout()
-    ws_thr_row.addWidget(QLabel("Watershed threshold scale:"))
     widget.dry_ws_threshold_input = QDoubleSpinBox()
     widget.dry_ws_threshold_input.setRange(0.25, 4.0)
     widget.dry_ws_threshold_input.setValue(1.0)
     widget.dry_ws_threshold_input.setSingleStep(0.05)
-    ws_thr_row.addWidget(widget.dry_ws_threshold_input)
-    lay.addLayout(ws_thr_row)
+    row(seg, "Watershed threshold scale:", widget.dry_ws_threshold_input)
 
     open_row = QHBoxLayout()
     widget.dry_open_btn = QPushButton("Open image / z-stack...")
     widget.dry_channel_input = QSpinBox()
     widget.dry_channel_input.setRange(0, 15)
     widget.dry_channel_input.setValue(2)
-    widget.dry_channel_input.setToolTip("Channel index for Z-C-Y-X files (BODIPY)")
     open_row.addWidget(widget.dry_open_btn, 1)
     open_row.addWidget(QLabel("Channel:"))
     open_row.addWidget(widget.dry_channel_input)
-    lay.addLayout(open_row)
-    widget.dry_layer_btn = QPushButton("Use selected image layer")
-    widget.dry_layer_btn.setToolTip(
-        "Segment an image layer already in the viewer, such as a snapped camera\n"
-        "frame. Aim points are only valid for the image they were computed on.")
-    lay.addWidget(widget.dry_layer_btn)
+    seg.addLayout(open_row)
 
-    def row(label, w):
-        r = QHBoxLayout(); r.addWidget(QLabel(label)); r.addWidget(w); lay.addLayout(r)
+    widget.dry_layer_btn = QPushButton("Use selected image layer")
+    seg.addWidget(widget.dry_layer_btn)
 
     widget.dry_rel_input = QDoubleSpinBox()
-    widget.dry_rel_input.setRange(0.0, 1.0); widget.dry_rel_input.setSingleStep(0.05)
+    widget.dry_rel_input.setRange(0.0, 1.0)
+    widget.dry_rel_input.setSingleStep(0.05)
     widget.dry_rel_input.setValue(0.10)
-    widget.dry_rel_input.setToolTip(
-        "Targeting filter: drop masks whose mean BODIPY intensity is below this "
-        "fraction of the brightest candidate mask")
-    row("Min relative intensity:", widget.dry_rel_input)
+    row(seg, "Min relative intensity:", widget.dry_rel_input)
+
     widget.dry_diameter_input = QDoubleSpinBox()
     widget.dry_diameter_input.setRange(0.0, 500.0)
     widget.dry_diameter_input.setValue(0.0)
     widget.dry_diameter_input.setSpecialValueText("Auto (model default)")
-    widget.dry_diameter_input.setToolTip(
-        "Droplet diameter in pixels. Leave on Auto: on BODIPY images a fixed\n"
-        "diameter such as 15 found only 2 of 9 droplets.")
-    row("Droplet diameter (px):", widget.dry_diameter_input)
+    row(seg, "Droplet diameter (px):", widget.dry_diameter_input)
+
     widget.dry_minarea_input = QSpinBox()
     widget.dry_minarea_input.setRange(1, 10_000_000)
     widget.dry_minarea_input.setSingleStep(10)
     widget.dry_minarea_input.setValue(50)
-    widget.dry_minarea_input.setToolTip(
-        "Targeting filter in pixels. Set this from the microscope pixel size "
-        "and the smallest droplet you are willing to measure.")
-    row("Min droplet area (px):", widget.dry_minarea_input)
+    row(seg, "Min droplet area (px):", widget.dry_minarea_input)
+
     widget.dry_flow_input = QDoubleSpinBox()
     widget.dry_flow_input.setRange(0.0, 3.0)
     widget.dry_flow_input.setSingleStep(0.05)
     widget.dry_flow_input.setValue(0.4)
-    widget.dry_flow_input.setToolTip(
-        "Cellpose flow threshold. Lower is stricter; 0.4 is the Cellpose default. "
-        "Increase only when reviewed droplets are being rejected.")
-    row("Flow threshold:", widget.dry_flow_input)
+    row(seg, "Cellpose flow threshold:", widget.dry_flow_input)
+
     widget.dry_cellprob_input = QDoubleSpinBox()
     widget.dry_cellprob_input.setRange(-10.0, 10.0)
     widget.dry_cellprob_input.setSingleStep(0.25)
     widget.dry_cellprob_input.setValue(0.0)
-    widget.dry_cellprob_input.setToolTip(
-        "Cellpose cell-probability threshold. 0.0 is the model default; negative "
-        "values accept weaker candidate regions and can create hazy/merged masks.")
-    row("Cell probability threshold:", widget.dry_cellprob_input)
+    row(seg, "Cellpose probability threshold:", widget.dry_cellprob_input)
+
     widget.dry_maxarea_input = QSpinBox()
     widget.dry_maxarea_input.setRange(0, 10_000_000)
     widget.dry_maxarea_input.setSingleStep(500)
     widget.dry_maxarea_input.setValue(3000)
     widget.dry_maxarea_input.setSpecialValueText("No limit")
-    widget.dry_maxarea_input.setToolTip(
-        "Skip objects larger than this many pixels (0 = no limit). Large hazy\n"
-        "blobs are usually clusters of unresolved small droplets. Depends on\n"
-        "magnification and image size; tune it on your own images.")
-    row("Max droplet area (px):", widget.dry_maxarea_input)
+    row(seg, "Max droplet area (px):", widget.dry_maxarea_input)
+
     widget.dry_density_input = QSpinBox()
-    widget.dry_density_input.setRange(1, 500); widget.dry_density_input.setValue(6)
-    row("Grid spacing (px):", widget.dry_density_input)
+    widget.dry_density_input.setRange(1, 500)
+    widget.dry_density_input.setValue(6)
+    row(seg, "Grid spacing (px):", widget.dry_density_input)
+
     widget.dry_margin_input = QDoubleSpinBox()
-    widget.dry_margin_input.setRange(0.0, 100.0); widget.dry_margin_input.setValue(4.0)
-    row("Edge margin (px):", widget.dry_margin_input)
-    widget.dry_link_check = QCheckBox("Link droplets across z (same colour)")
+    widget.dry_margin_input.setRange(0.0, 100.0)
+    widget.dry_margin_input.setValue(4.0)
+    row(seg, "Safe interior margin (px):", widget.dry_margin_input)
+
+    widget.dry_link_check = QCheckBox("Link droplets across Z (same object)")
     widget.dry_link_check.setChecked(True)
-    lay.addWidget(widget.dry_link_check)
+    seg.addWidget(widget.dry_link_check)
 
     btn_row = QHBoxLayout()
     widget.dry_plane_btn = QPushButton("Segment current plane")
     widget.dry_all_btn = QPushButton("Segment all planes")
-    btn_row.addWidget(widget.dry_plane_btn); btn_row.addWidget(widget.dry_all_btn)
-    lay.addLayout(btn_row)
-    widget.dry_export_btn = QPushButton("Export targets (CSV)")
-    lay.addWidget(widget.dry_export_btn)
-    lay.addWidget(QLabel(
-        "Send to acquisition: run 'Manual selection' first, then pick the\n"
-        "cell layer. Targets must come from the camera's own image."))
-    widget.dry_grid_check = QCheckBox("Include grid points (not just aim points)")
+    btn_row.addWidget(widget.dry_plane_btn)
+    btn_row.addWidget(widget.dry_all_btn)
+    seg.addLayout(btn_row)
+
+    qc = step(
+        "2 - Review targets + set the baseline population",
+        "Keep only trustworthy droplets. The pilot limiter intentionally prefers "
+        "large, bright droplets with the deepest safe interior Raman aim point.",
+        "The default ranking is conservative: larger inscribed radius first, then "
+        "BODIPY intensity, then area. This is for targeting safety, not biology.",
+    )
+
+    legend = QLabel(
+        "Overlay legend: red = Raman aim | gray = held/rejected | "
+        "magenta = changing revisit | cyan = stable-control revisit"
+    )
+    legend.setWordWrap(True)
+    legend.setToolTip(
+        "Colors are fixed so timepoint comparisons stay readable. "
+        "Stable means morphology-stable after tracking, not spatially stationary."
+    )
+    qc.addWidget(legend)
+
+    widget.dry_grid_check = QCheckBox("Include grid points (not just one aim point)")
     widget.dry_grid_check.setChecked(False)
-    lay.addWidget(widget.dry_grid_check)
+    qc.addWidget(widget.dry_grid_check)
 
     pilot_row = QHBoxLayout()
     widget.dry_limit_check = QCheckBox("Limit pilot to safest targets")
@@ -245,47 +290,55 @@ def build_dry_run_controls(widget):
     widget.dry_limit_input.setSuffix(" targets")
     pilot_row.addWidget(widget.dry_limit_check)
     pilot_row.addWidget(widget.dry_limit_input)
-    lay.addLayout(pilot_row)
+    qc.addLayout(pilot_row)
 
     review_row = QHBoxLayout()
     widget.dry_reject_btn = QPushButton("Reject selected aim(s)")
     widget.dry_keep_btn = QPushButton("Keep selected aim(s) only")
     review_row.addWidget(widget.dry_reject_btn)
     review_row.addWidget(widget.dry_keep_btn)
-    lay.addLayout(review_row)
+    qc.addLayout(review_row)
+
     widget.dry_reset_btn = QPushButton("Reset acceptance")
-    lay.addWidget(widget.dry_reset_btn)
+    qc.addWidget(widget.dry_reset_btn)
 
-    lay.addWidget(QLabel("Adaptive revisit selection:"))
-    widget.dry_baseline_btn = QPushButton("Set accepted targets as baseline")
-    lay.addWidget(widget.dry_baseline_btn)
+    widget.dry_baseline_btn = QPushButton("Set accepted targets as T0 baseline")
+    qc.addWidget(widget.dry_baseline_btn)
 
-    adaptive_match_row = QHBoxLayout()
-    adaptive_match_row.addWidget(QLabel("Max match distance (px):"))
+    track = step(
+        "3 - Live lipolysis tracking + Raman revisit",
+        "For T1/T2/T3: register the whole field to T0, match droplets one-to-one, "
+        "then rank morphology change. Movement alone is not called lipolysis.",
+        "Field registration corrects global XY drift first. Matching uses registered "
+        "distance plus weak area/intensity consistency terms and a one-to-one global "
+        "assignment. Classification then uses morphology change, not displacement.",
+    )
+
+    widget.dry_register_btn = QPushButton("Register current frame to T0 baseline")
+    widget.dry_register_btn.setEnabled(False)
+    track.addWidget(widget.dry_register_btn)
+
+    widget.dry_tracking_status = QLabel("No T0 baseline / field registration yet.")
+    widget.dry_tracking_status.setWordWrap(True)
+    track.addWidget(widget.dry_tracking_status)
+
     widget.dry_match_distance_input = QDoubleSpinBox()
     widget.dry_match_distance_input.setRange(1.0, 500.0)
     widget.dry_match_distance_input.setValue(25.0)
     widget.dry_match_distance_input.setSingleStep(1.0)
-    adaptive_match_row.addWidget(widget.dry_match_distance_input)
-    lay.addLayout(adaptive_match_row)
+    row(track, "Max registered match distance (px):", widget.dry_match_distance_input)
 
-    adaptive_change_row = QHBoxLayout()
-    adaptive_change_row.addWidget(QLabel("Changing if |area change| >= (%):"))
     widget.dry_change_threshold_input = QDoubleSpinBox()
     widget.dry_change_threshold_input.setRange(0.0, 500.0)
     widget.dry_change_threshold_input.setValue(15.0)
     widget.dry_change_threshold_input.setSingleStep(1.0)
-    adaptive_change_row.addWidget(widget.dry_change_threshold_input)
-    lay.addLayout(adaptive_change_row)
+    row(track, "Changing if |area change| >= (%):", widget.dry_change_threshold_input)
 
-    adaptive_stable_row = QHBoxLayout()
-    adaptive_stable_row.addWidget(QLabel("Stable control if |area change| <= (%):"))
     widget.dry_stable_threshold_input = QDoubleSpinBox()
     widget.dry_stable_threshold_input.setRange(0.0, 100.0)
     widget.dry_stable_threshold_input.setValue(5.0)
     widget.dry_stable_threshold_input.setSingleStep(1.0)
-    adaptive_stable_row.addWidget(widget.dry_stable_threshold_input)
-    lay.addLayout(adaptive_stable_row)
+    row(track, "Stable control if |area change| <= (%):", widget.dry_stable_threshold_input)
 
     adaptive_count_row = QHBoxLayout()
     adaptive_count_row.addWidget(QLabel("Changing targets:"))
@@ -298,37 +351,96 @@ def build_dry_run_controls(widget):
     widget.dry_stable_count_input.setRange(0, 1000)
     widget.dry_stable_count_input.setValue(2)
     adaptive_count_row.addWidget(widget.dry_stable_count_input)
-    lay.addLayout(adaptive_count_row)
+    track.addLayout(adaptive_count_row)
 
     widget.dry_auto_adaptive_check = QCheckBox(
-        "Auto-prioritize after each new segmentation when baseline exists"
+        "Auto-register + re-rank after each new segmentation when T0 exists"
     )
     widget.dry_auto_adaptive_check.setChecked(True)
-    lay.addWidget(widget.dry_auto_adaptive_check)
+    track.addWidget(widget.dry_auto_adaptive_check)
+
     widget.dry_prioritize_btn = QPushButton(
-        "Prioritize changing droplets + stable controls"
+        "Match + prioritize changing droplets and stable controls"
     )
-    lay.addWidget(widget.dry_prioritize_btn)
-    widget.dry_adaptive_status = QLabel("No adaptive baseline set")
+    track.addWidget(widget.dry_prioritize_btn)
+
+    widget.dry_adaptive_status = QLabel("No live-tracking baseline set")
     widget.dry_adaptive_status.setWordWrap(True)
-    lay.addWidget(widget.dry_adaptive_status)
+    track.addWidget(widget.dry_adaptive_status)
+
+    math_note = QLabel(
+        "Current response metric: %dA = 100 x (A_t - A_0) / A_0. "
+        "Planned volume proxy for spherical droplets: V ~ pi*d^3/6; "
+        "lipolytic flux ~ dV/dt."
+    )
+    math_note.setWordWrap(True)
+    math_note.setToolTip(
+        "Area change is currently used only as a morphology response score. "
+        "It should not be called biochemical lipolysis until volume/flux and "
+        "tracking have been validated."
+    )
+    track.addWidget(math_note)
+
+    handoff = step(
+        "4 - Autofocus + Raman handoff",
+        "Use Jeff's Autofocus/MDA controls for focus and acquisition. This panel "
+        "only supplies curated lipid-droplet coordinates.",
+        "Recommended loop: choose/validate a stable autofocus reference for the FOV "
+        "(or use Jeff's automatic low-structure patch selection), autofocus, then "
+        "validate image-to-galvo mapping, prepare the MDA, review Jeff's MDA summary, "
+        "and press Run there.",
+    )
+
+    af_note = QLabel(
+        "Autofocus reference: do NOT use a lipid droplet that may shrink/disappear. "
+        "Jeff's automatic laser-AF mode searches for a large low-structure / empty "
+        "patch with enough clearance; manual references should likewise be stable "
+        "and separate from the changing droplets."
+    )
+    af_note.setWordWrap(True)
+    af_note.setToolTip(
+        "Automatic focus selection masks structured BF/fluorescent regions, computes "
+        "clearance from occupied pixels, and chooses the largest low-structure patch "
+        "above the minimum radius. The laser autofocus then searches Z and requires "
+        "a bracketed focus-score peak before accepting a new baseline Z."
+    )
+    handoff.addWidget(af_note)
 
     widget.dry_best_check = QCheckBox("Best plane per droplet only")
     widget.dry_best_check.setChecked(True)
-    lay.addWidget(widget.dry_best_check)
+    handoff.addWidget(widget.dry_best_check)
+
     pos_row = QHBoxLayout()
     pos_row.addWidget(QLabel("Stage position index:"))
     widget.dry_pos_input = QSpinBox()
     widget.dry_pos_input.setRange(0, 100000)
     pos_row.addWidget(widget.dry_pos_input)
-    lay.addLayout(pos_row)
-    widget.dry_validate_map_btn = QPushButton("Validate image -> galvo mapping (no motion)")
-    lay.addWidget(widget.dry_validate_map_btn)
-    widget.dry_prepare_mda_btn = QPushButton("Prepare curated droplets for Raman MDA")
-    lay.addWidget(widget.dry_prepare_mda_btn)
+    handoff.addLayout(pos_row)
+
+    widget.dry_validate_map_btn = QPushButton(
+        "Validate image -> galvo mapping (math only; no motion)"
+    )
+    handoff.addWidget(widget.dry_validate_map_btn)
+
+    widget.dry_prepare_mda_btn = QPushButton(
+        "Prepare curated droplets for Jeff's Raman MDA"
+    )
+    widget.dry_prepare_mda_btn.setEnabled(False)
+    handoff.addWidget(widget.dry_prepare_mda_btn)
+
+    widget.dry_export_btn = QPushButton("Export target + tracking table (CSV)")
+    handoff.addWidget(widget.dry_export_btn)
+
+    loop_note = QLabel(
+        "Repeat for the next timepoint: autofocus / image -> register -> track -> "
+        "rank -> Raman responders + stable controls."
+    )
+    loop_note.setWordWrap(True)
+    handoff.addWidget(loop_note)
+
     widget.dry_send_btn = QPushButton("Legacy: send to selected cell layer")
     widget.dry_send_btn.hide()
-    lay.addWidget(widget.dry_send_btn)
+
     widget.dry_status = QLabel("")
     widget.dry_status.setWordWrap(True)
     lay.addWidget(widget.dry_status)
@@ -343,31 +455,161 @@ def build_dry_run_controls(widget):
         "rejected": set(),
         "aim_index_keys": [],
         "baseline": [],
+        "baseline_image": None,
+        "field_shift_yx": None,
+        "registration_error": None,
         "adaptive_matches": [],
         "adaptive_keep": None,
+        "mapping_valid": False,
+        "mda_prepared": False,
+        "galvo_preview": [],
     }
+
     widget.dry_open_btn.clicked.connect(lambda _=False: _open(widget))
-    widget.dry_plane_btn.clicked.connect(lambda _=False: _segment(widget, current_only=True))
-    widget.dry_all_btn.clicked.connect(lambda _=False: _segment(widget, current_only=False))
+    widget.dry_plane_btn.clicked.connect(
+        lambda _=False: _segment(widget, current_only=True)
+    )
+    widget.dry_all_btn.clicked.connect(
+        lambda _=False: _segment(widget, current_only=False)
+    )
     widget.dry_export_btn.clicked.connect(lambda _=False: _export(widget))
     widget.dry_layer_btn.clicked.connect(lambda _=False: _use_layer(widget))
     widget.dry_send_btn.clicked.connect(lambda _=False: _send(widget))
-    widget.dry_validate_map_btn.clicked.connect(lambda _=False: _validate_galvo_mapping(widget))
-    widget.dry_prepare_mda_btn.clicked.connect(lambda _=False: _prepare_raman_mda(widget))
+    widget.dry_validate_map_btn.clicked.connect(
+        lambda _=False: _validate_galvo_mapping(widget)
+    )
+    widget.dry_prepare_mda_btn.clicked.connect(
+        lambda _=False: _prepare_raman_mda(widget)
+    )
+    widget.dry_register_btn.clicked.connect(
+        lambda _=False: _register_to_baseline(widget)
+    )
     widget.dry_reject_btn.clicked.connect(lambda _=False: _reject_selected(widget))
-    widget.dry_keep_btn.clicked.connect(lambda _=False: _keep_selected_only(widget))
+    widget.dry_keep_btn.clicked.connect(
+        lambda _=False: _keep_selected_only(widget)
+    )
     widget.dry_reset_btn.clicked.connect(lambda _=False: _reset_acceptance(widget))
-    widget.dry_baseline_btn.clicked.connect(lambda _=False: _set_adaptive_baseline(widget))
-    widget.dry_prioritize_btn.clicked.connect(lambda _=False: _adaptive_prioritize(widget))
-    widget.dry_grid_check.toggled.connect(lambda _=False: _refresh_target_layers(widget))
-    widget.dry_limit_check.toggled.connect(lambda _=False: _apply_pilot_limit(widget))
-    widget.dry_limit_input.valueChanged.connect(lambda _=0: _apply_pilot_limit(widget))
+    widget.dry_baseline_btn.clicked.connect(
+        lambda _=False: _set_adaptive_baseline(widget)
+    )
+    widget.dry_prioritize_btn.clicked.connect(
+        lambda _=False: _adaptive_prioritize(widget)
+    )
+    widget.dry_grid_check.toggled.connect(
+        lambda _=False: _refresh_target_layers(widget)
+    )
+    widget.dry_limit_check.toggled.connect(
+        lambda _=False: _apply_pilot_limit(widget)
+    )
+    widget.dry_limit_input.valueChanged.connect(
+        lambda _=0: _apply_pilot_limit(widget)
+    )
+    _update_state_summary(widget)
     return box
+
+
+def _update_state_summary(widget):
+    """Refresh the compact live-lipolysis state display."""
+    dry = getattr(widget, "_dry", {})
+    candidates = sum(len(v) for v in (dry.get("all_targets") or {}).values())
+    accepted = sum(len(v) for v in (dry.get("targets") or {}).values())
+    baseline = len(dry.get("baseline") or [])
+    shift = dry.get("field_shift_yx")
+    shift_text = (
+        "No"
+        if shift is None
+        else f"Yes (dy={float(shift[0]):+.1f}, dx={float(shift[1]):+.1f} px)"
+    )
+    mapping = "Yes" if dry.get("mapping_valid") else "No"
+    prepared = "Yes" if dry.get("mda_prepared") else "No"
+    if hasattr(widget, "dry_state_label"):
+        widget.dry_state_label.setText(
+            f"Candidates: {candidates} | Accepted: {accepted}\n"
+            f"T0 baseline: {baseline if baseline else 'No'} | Registered: {shift_text}\n"
+            f"Galvo mapping validated: {mapping} | MDA prepared: {prepared}"
+        )
+    if hasattr(widget, "dry_register_btn"):
+        widget.dry_register_btn.setEnabled(bool(baseline and dry.get("stack") is not None))
+    if hasattr(widget, "dry_prepare_mda_btn"):
+        widget.dry_prepare_mda_btn.setEnabled(
+            bool(dry.get("mapping_valid") and accepted)
+        )
+
+
+def _invalidate_handoff(widget):
+    """Any target change invalidates old mapping/MDA preparation state."""
+    widget._dry["mapping_valid"] = False
+    widget._dry["mda_prepared"] = False
+    widget._dry["galvo_preview"] = []
+    if hasattr(widget, "dry_prepare_mda_btn"):
+        widget.dry_prepare_mda_btn.setEnabled(False)
+    _update_state_summary(widget)
+
+
+def _projection(stack):
+    """Return a robust 2D image for field registration."""
+    data = np.asarray(stack, dtype=np.float32)
+    if data.ndim == 2:
+        return data
+    if data.ndim != 3:
+        raise ValueError(f"registration expects Y-X or Z-Y-X, got {data.shape}")
+    return np.max(data, axis=0)
+
+
+def _register_to_baseline(widget):
+    """Estimate whole-field translation from current image to T0."""
+    baseline = widget._dry.get("baseline_image")
+    current = widget._dry.get("stack")
+    if baseline is None or current is None:
+        widget._dry["field_shift_yx"] = None
+        if hasattr(widget, "dry_tracking_status"):
+            widget.dry_tracking_status.setText(
+                "Set a T0 baseline, then load the next frame before registration."
+            )
+        _update_state_summary(widget)
+        return False
+    current = _projection(current)
+    baseline = np.asarray(baseline, dtype=np.float32)
+    if current.shape != baseline.shape:
+        widget._dry["field_shift_yx"] = None
+        if hasattr(widget, "dry_tracking_status"):
+            widget.dry_tracking_status.setText(
+                f"Registration skipped: T0 shape {baseline.shape} != current {current.shape}."
+            )
+        _update_state_summary(widget)
+        return False
+    try:
+        from skimage.registration import phase_cross_correlation
+        shift, error, _phase = phase_cross_correlation(
+            baseline, current, upsample_factor=10
+        )
+        shift = np.asarray(shift, dtype=float)
+        if shift.shape != (2,) or not np.isfinite(shift).all():
+            raise ValueError("registration returned an invalid XY shift")
+        widget._dry["field_shift_yx"] = shift
+        widget._dry["registration_error"] = float(error)
+        if hasattr(widget, "dry_tracking_status"):
+            widget.dry_tracking_status.setText(
+                f"Field registered to T0: dy={shift[0]:+.2f} px, "
+                f"dx={shift[1]:+.2f} px; phase-correlation error={float(error):.3g}. "
+                "Droplet matching uses registered coordinates."
+            )
+        _update_state_summary(widget)
+        return True
+    except Exception as exc:
+        widget._dry["field_shift_yx"] = None
+        widget._dry["registration_error"] = None
+        if hasattr(widget, "dry_tracking_status"):
+            widget.dry_tracking_status.setText(f"Field registration failed: {exc}")
+        _update_state_summary(widget)
+        return False
 
 
 def _say(widget, text):
     widget.dry_status.setText(text)
     widget.status.setText(f"Status: {text}")
+    _update_state_summary(widget)
+    _update_state_summary(widget)
 
 
 def _open(widget):
@@ -406,7 +648,8 @@ def _load_stack(widget, stack, label):
     widget._dry.update(
         stack=stack, targets={}, all_targets={}, raw_masks={},
         rejected=set(), aim_index_keys=[], adaptive_matches=[],
-        adaptive_keep=None,
+        adaptive_keep=None, field_shift_yx=None, registration_error=None,
+        mapping_valid=False, mda_prepared=False, galvo_preview=[],
     )
     widget.viewer.add_image(
         stack, name=IMAGE, colormap="green", blending="additive",
@@ -499,6 +742,7 @@ def _segment(widget, current_only):
     widget._dry["raw_masks"] = {}
     widget._dry["rejected"] = set()
     widget._dry["aim_index_keys"] = []
+    _invalidate_handoff(widget)
     for b in (widget.dry_plane_btn, widget.dry_all_btn, widget.dry_open_btn, widget.dry_layer_btn):
         b.setEnabled(False)
 
@@ -567,6 +811,7 @@ def _segment(widget, current_only):
             widget._dry.get("baseline")
             and widget.dry_auto_adaptive_check.isChecked()
         ):
+            _register_to_baseline(widget)
             _adaptive_prioritize(widget)
         else:
             _apply_pilot_limit(widget)
@@ -626,6 +871,7 @@ def _candidate_entries(widget):
 
 def _refresh_target_layers(widget):
     """Rebuild accepted/rejected masks and points from the curation state."""
+    _invalidate_handoff(widget)
     stack = widget._dry.get("stack")
     if stack is None or LABELS not in widget.viewer.layers:
         return
@@ -743,7 +989,7 @@ def _reset_acceptance(widget):
 
 
 def _set_adaptive_baseline(widget):
-    """Store the currently accepted droplets as the morphology baseline."""
+    """Store accepted droplets and the current field image as the T0 baseline."""
     targets = widget._dry.get("targets") or {}
     baseline = []
     for z in sorted(targets):
@@ -758,48 +1004,86 @@ def _set_adaptive_baseline(widget):
                 }
             )
     if not baseline:
-        _say(widget, "no accepted droplets to store as baseline")
+        _say(widget, "no accepted droplets to store as T0 baseline")
+        return
+    stack = widget._dry.get("stack")
+    if stack is None:
+        _say(widget, "no image loaded for T0 baseline")
         return
     widget._dry["baseline"] = baseline
+    widget._dry["baseline_image"] = _projection(stack).copy()
     widget._dry["adaptive_matches"] = []
     widget._dry["adaptive_keep"] = None
+    widget._dry["field_shift_yx"] = np.zeros(2, dtype=float)
+    widget._dry["registration_error"] = 0.0
+    _invalidate_handoff(widget)
     widget.dry_adaptive_status.setText(
-        f"Baseline stored: {len(baseline)} accepted droplet(s). "
-        "Load/segment the next frame to prioritize revisits."
+        f"T0 stored: {len(baseline)} accepted droplet(s). "
+        "Load/segment T1, then register and match before ranking."
     )
-    _say(widget, f"adaptive baseline stored: {len(baseline)} droplet(s)")
-
+    if hasattr(widget, "dry_tracking_status"):
+        widget.dry_tracking_status.setText(
+            "T0 field stored. Current shift is (0, 0) px by definition."
+        )
+    _say(widget, f"T0 baseline stored: {len(baseline)} droplet(s)")
 
 def _match_adaptive_targets(widget):
-    """One-to-one nearest-neighbor match baseline to current candidates."""
+    """Globally match T0 droplets to current candidates after field registration.
+
+    The cost is dominated by registered XY distance, with weak area/intensity
+    consistency terms. This permits biological motion while preventing one
+    current droplet from being assigned to multiple T0 droplets.
+    """
     baseline = list(widget._dry.get("baseline") or [])
     current = _candidate_entries(widget)
     if not baseline or not current:
         return []
 
+    shift = np.asarray(
+        widget._dry.get("field_shift_yx")
+        if widget._dry.get("field_shift_yx") is not None
+        else (0.0, 0.0),
+        dtype=float,
+    )
     max_distance = float(widget.dry_match_distance_input.value())
-    candidates = []
+    from scipy.optimize import linear_sum_assignment
+
+    cost = np.full((len(baseline), len(current)), 1e6, dtype=float)
+    raw_distance = np.full_like(cost, np.nan)
+    registered_distance = np.full_like(cost, np.nan)
+
     for bi, base in enumerate(baseline):
-        for key, z, target in current:
+        base_aim = np.asarray(base["aim"], dtype=float)
+        base_area = max(float(base.get("area", 0.0)), 1e-9)
+        base_intensity = max(float(base.get("mean_intensity", 0.0)), 1e-9)
+        for ci, (_key, z, target) in enumerate(current):
             if int(z) != int(base["z"]):
                 continue
-            distance = float(
-                np.linalg.norm(
-                    np.asarray(target["aim"], dtype=float)
-                    - np.asarray(base["aim"], dtype=float)
-                )
+            aim = np.asarray(target["aim"], dtype=float)
+            raw = float(np.linalg.norm(aim - base_aim))
+            registered = float(np.linalg.norm((aim + shift) - base_aim))
+            raw_distance[bi, ci] = raw
+            registered_distance[bi, ci] = registered
+            if registered > max_distance:
+                continue
+            area = max(float(target.get("area", 0.0)), 1e-9)
+            intensity = max(float(target.get("mean_intensity", 0.0)), 1e-9)
+            area_term = abs(np.log(area / base_area))
+            intensity_term = abs(np.log(intensity / base_intensity))
+            # Distance is the main identity cue. Morphology/intensity terms are
+            # deliberately weak because lipolysis itself changes these quantities.
+            cost[bi, ci] = (
+                registered / max(max_distance, 1e-9)
+                + 0.20 * area_term
+                + 0.05 * intensity_term
             )
-            if distance <= max_distance:
-                candidates.append((distance, bi, key, z, target))
 
+    rows, cols = linear_sum_assignment(cost)
     matches = []
-    used_baseline = set()
-    used_current = set()
-    for distance, bi, key, z, target in sorted(candidates, key=lambda row: row[0]):
-        if bi in used_baseline or key in used_current:
+    for bi, ci in zip(rows, cols):
+        if cost[bi, ci] >= 1e5:
             continue
-        used_baseline.add(bi)
-        used_current.add(key)
+        key, z, target = current[ci]
         base = baseline[bi]
         base_area = float(base.get("area", 0.0))
         current_area = float(target.get("area", 0.0))
@@ -808,13 +1092,17 @@ def _match_adaptive_targets(widget):
             if base_area > 0
             else np.nan
         )
+        confidence = float(np.exp(-cost[bi, ci]))
         matches.append(
             {
                 "key": key,
                 "z": int(z),
                 "target": target,
                 "baseline_index": int(bi),
-                "distance_px": distance,
+                "distance_px": float(registered_distance[bi, ci]),
+                "raw_distance_px": float(raw_distance[bi, ci]),
+                "registered_distance_px": float(registered_distance[bi, ci]),
+                "tracking_confidence": confidence,
                 "baseline_area": base_area,
                 "current_area": current_area,
                 "area_change_pct": float(area_change_pct),
@@ -823,7 +1111,6 @@ def _match_adaptive_targets(widget):
         )
     return matches
 
-
 def _adaptive_prioritize(widget):
     """Select changing droplets plus stable matched controls for revisit."""
     if not widget._dry.get("baseline"):
@@ -831,6 +1118,12 @@ def _adaptive_prioritize(widget):
         _say(widget, "set accepted targets as baseline first")
         return
 
+    if (
+        widget._dry.get("baseline_image") is not None
+        and widget._dry.get("stack") is not None
+        and widget._dry.get("field_shift_yx") is None
+    ):
+        _register_to_baseline(widget)
     matches = _match_adaptive_targets(widget)
     widget._dry["adaptive_matches"] = matches
     if not matches:
@@ -877,6 +1170,9 @@ def _adaptive_prioritize(widget):
         target["baseline_area"] = row["baseline_area"]
         target["area_change_pct"] = row["area_change_pct"]
         target["match_distance_px"] = row["distance_px"]
+        target["raw_displacement_px"] = row.get("raw_distance_px", row["distance_px"])
+        target["registered_distance_px"] = row.get("registered_distance_px", row["distance_px"])
+        target["tracking_confidence"] = row.get("tracking_confidence", np.nan)
         target["adaptive_class"] = (
             "changing" if row["key"] in {x["key"] for x in changing}
             else "stable_control" if row["key"] in {x["key"] for x in stable}
@@ -896,10 +1192,12 @@ def _adaptive_prioritize(widget):
     if STABLE in widget.viewer.layers:
         widget.viewer.layers[STABLE].data = stable_pts
 
+    mean_conf = np.mean([row.get("tracking_confidence", np.nan) for row in matches])
     widget.dry_adaptive_status.setText(
-        f"Matched {len(matches)} baseline droplet(s): "
-        f"{len(changing)} changing + {len(stable)} stable control(s) selected. "
-        "Area change is a 2D morphology proxy, not lipid mass/volume."
+        f"Matched {len(matches)} T0 droplet(s): "
+        f"{len(changing)} changing + {len(stable)} morphology-stable control(s). "
+        f"Mean tracking confidence={mean_conf:.2f}. "
+        "Movement is tracked separately; area change is still only a 2D morphology proxy."
     )
     _say(
         widget,
@@ -941,10 +1239,16 @@ def _validate_galvo_mapping(widget):
                 mapped.append((int(z), int(y), int(x), vx, vy))
     except Exception as exc:
         widget._dry["galvo_preview"] = []
+        widget._dry["mapping_valid"] = False
+        widget._dry["mda_prepared"] = False
+        _update_state_summary(widget)
         _say(widget, f"galvo mapping invalid -- {exc}")
         return False
 
     widget._dry["galvo_preview"] = mapped
+    widget._dry["mapping_valid"] = True
+    widget._dry["mda_prepared"] = False
+    _update_state_summary(widget)
     vx = [row[3] for row in mapped]
     vy = [row[4] for row in mapped]
     _say(
@@ -968,6 +1272,9 @@ def _prepare_raman_mda(widget):
         return
     if widget.core is None or widget.main_window is None:
         _say(widget, "connect the microscope first so the MDA context is available")
+        return
+    if not widget._dry.get("mapping_valid"):
+        _say(widget, "validate image -> galvo mapping before preparing Raman MDA")
         return
     if not _validate_galvo_mapping(widget):
         return
@@ -1020,12 +1327,16 @@ def _prepare_raman_mda(widget):
         # This remains a preparation step only; acquisition starts only from
         # the MDA Run control.
         apply_prepared_positions(widget)
+        widget._dry["mda_prepared"] = True
+        _update_state_summary(widget)
         _say(
             widget,
             f"prepared {len(rows)} curated droplet target(s) for Raman MDA; "
             "review the MDA summary before Run",
         )
     except Exception as exc:
+        widget._dry["mda_prepared"] = False
+        _update_state_summary(widget)
         _say(widget, f"could not prepare Raman MDA -- {exc}")
 
 
@@ -1054,7 +1365,9 @@ def _export(widget):
             "z", "droplet_id", "kind", "y_px", "x_px",
             "galvo_x_V", "galvo_y_V", "best_z",
             "area_px", "baseline_area_px", "area_change_pct",
-            "match_distance_px", "adaptive_class",
+            "raw_displacement_px", "registered_distance_px",
+            "tracking_confidence", "field_shift_y_px", "field_shift_x_px",
+            "adaptive_class",
         ])
         for z in sorted(targets):
             for t in targets[z]:
@@ -1082,7 +1395,15 @@ def _export(widget):
                         int(t.get("area", 0)),
                         t.get("baseline_area", ""),
                         t.get("area_change_pct", ""),
-                        t.get("match_distance_px", ""),
+                        t.get("raw_displacement_px", ""),
+                        t.get("registered_distance_px", t.get("match_distance_px", "")),
+                        t.get("tracking_confidence", ""),
+                        (widget._dry.get("field_shift_yx") or ["", ""])[0]
+                        if not isinstance(widget._dry.get("field_shift_yx"), np.ndarray)
+                        else widget._dry["field_shift_yx"][0],
+                        (widget._dry.get("field_shift_yx") or ["", ""])[1]
+                        if not isinstance(widget._dry.get("field_shift_yx"), np.ndarray)
+                        else widget._dry["field_shift_yx"][1],
                         t.get("adaptive_class", ""),
                     ])
                     rows += 1

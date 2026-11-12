@@ -264,9 +264,11 @@ HELP = {
         "press Escape to stop. Needs a Vandermonde model and hardware."
     ),
     "laser_autofocus_btn": (
-        "Run the two-pass laser autofocus scan at the center of the current "
-        "FOV. Uses the coarse and fine autofocus range/point settings from "
-        "Raman MDA, leaves XY fixed, and moves Z to the best focus."
+        "Run Jeff's two-pass laser autofocus at the current FOV center. The "
+        "camera-derived focus score is scanned over Z; a valid result requires "
+        "a bracketed peak (score > 800,000), then a 0.5-um fine scan selects Z. "
+        "For live lipolysis, use this before baseline imaging or as a manual "
+        "focus check; do not use a shrinking lipid droplet as the reference."
     ),
     "center_laser_btn": (
         "Point and hold the laser at calibrated pixel (512, 512), the same "
@@ -407,6 +409,122 @@ HELP = {
         "Open the indexed, on-demand viewer. Imaging and Raman folders can be "
         "selected independently; only the requested spectrum and image tiles "
         "are loaded."
+    ),
+    "choose_af_references_btn": (
+        "Choose one autofocus reference per FOV from an acquired camera image. "
+        "For lipolysis, choose a stable low-structure region rather than a lipid "
+        "droplet that may shrink, fuse, move, or disappear. No point means AF is "
+        "skipped for that FOV."
+    ),
+    "mda_auto_af_check": (
+        "Let Jeff's MDA choose the autofocus reference automatically from the "
+        "scheduled camera images. It masks structured BF/fluorescent regions and "
+        "selects the largest low-structure patch with sufficient clearance. "
+        "This overrides manual autofocus references for the run."
+    ),
+    "mda_auto_af_radius": (
+        "Minimum radius, in camera pixels, required for the automatically chosen "
+        "low-structure autofocus patch. Larger values demand a cleaner, larger "
+        "reference region; if none exists, autofocus is skipped at that field."
+    ),
+    "mda_af_mode_combo": (
+        "Laser autofocus mode used by the MDA. The laser-AF routine searches Z "
+        "for a bracketed camera focus-score peak, then refines it at 0.5-um steps."
+    ),
+    "mda_repeats_input": (
+        "Consecutive Raman frames collected at each selected droplet before "
+        "moving to the next target. This is separate from biological timepoints."
+    ),
+    "mda_pre_acq_check": (
+        "Take a discarded pre-acquisition before the real Raman spectrum so the "
+        "galvo settles at an arbitrary target. Keep this unless validated data "
+        "show it is unnecessary for your targeting mode."
+    ),
+    "mda_batch_check": (
+        "Legacy integrated-batch behavior for combining multiple aiming points. "
+        "For the lipid-droplet workflow we normally use one curated interior "
+        "point per droplet rather than an integrated batch."
+    ),
+    "apply_mda_positions_btn": (
+        "Attach the currently prepared positions/targets to Jeff's shared MDA "
+        "panel. This prepares metadata and positions; it does NOT start acquisition."
+    ),
+
+    # ============ LIVE LIPOLYSIS LOOP ============
+    "dry_engine_combo": (
+        "Choose how BODIPY droplets are segmented. Watershed is the current "
+        "conservative baseline; Cellpose remains available for comparison."
+    ),
+    "dry_ws_bg_input": (
+        "Gaussian background scale used before watershed. A larger sigma removes "
+        "slower spatial background while preserving compact bright droplets."
+    ),
+    "dry_ws_distance_input": (
+        "Minimum spacing between watershed seed peaks. Larger values reduce "
+        "over-splitting; smaller values can separate tightly packed droplets."
+    ),
+    "dry_ws_threshold_input": (
+        "Multiplier on the Otsu threshold after background subtraction. Values "
+        "above 1 are stricter; below 1 admit dimmer candidate pixels."
+    ),
+    "dry_minarea_input": (
+        "Reject segmented objects below this area in pixels. Convert your desired "
+        "minimum droplet size using the calibrated Raman-camera pixel size."
+    ),
+    "dry_maxarea_input": (
+        "Reject very large connected objects that are likely unresolved clusters "
+        "or broad haze rather than one Raman-addressable lipid droplet."
+    ),
+    "dry_margin_input": (
+        "Required safe interior radius around the Raman aim point. The aim is "
+        "chosen at the distance-transform maximum, i.e. deepest inside the mask."
+    ),
+    "dry_limit_check": (
+        "Conservative pilot mode. Candidates are ranked by safe interior radius, "
+        "then BODIPY intensity, then area; this ranking is for targeting safety, "
+        "not lipolysis biology."
+    ),
+    "dry_baseline_btn": (
+        "Store the accepted T0 droplets plus the current BODIPY field image. "
+        "Later frames are registered to this field before individual droplets "
+        "are matched."
+    ),
+    "dry_register_btn": (
+        "Estimate whole-field XY drift between the current image and T0 using "
+        "phase cross-correlation. The resulting dy/dx is applied before droplet "
+        "matching so stage/cell translation is not mistaken for lipolysis."
+    ),
+    "dry_match_distance_input": (
+        "Maximum allowed distance after field registration for a T0/current "
+        "droplet pair. Matching is global one-to-one, so one current droplet "
+        "cannot be assigned to multiple T0 droplets."
+    ),
+    "dry_change_threshold_input": (
+        "Changing threshold for the current morphology score: "
+        "|%dA| = |100*(A_t-A_0)/A_0|. This is not yet a direct biochemical "
+        "lipolysis measurement."
+    ),
+    "dry_stable_threshold_input": (
+        "A matched droplet with |%dA| at or below this value can serve as a "
+        "morphology-stable internal control even if it moved substantially."
+    ),
+    "dry_prioritize_btn": (
+        "Register/match T0 to the current frame, then keep the strongest "
+        "morphology responders plus a requested number of morphology-stable controls."
+    ),
+    "dry_validate_map_btn": (
+        "Convert every accepted image aim point to calibrated galvo volts and "
+        "check finiteness/+-1.6 V limits. This is math only: no galvo, stage, "
+        "shutter, laser, or acquisition command is issued."
+    ),
+    "dry_prepare_mda_btn": (
+        "After galvo mapping passes, create one Raman source point per accepted "
+        "droplet and attach it to Jeff's MDA. This still does NOT press Run or "
+        "move hardware."
+    ),
+    "dry_export_btn": (
+        "Export target coordinates plus morphology/tracking provenance, including "
+        "field shift, registered distance, tracking confidence, and response class."
     ),
 
     # ---- pixel-to-stage calibration (inside Run Raman MDA) ----

@@ -795,6 +795,20 @@ def install_unified_mda(owner):
     dock = owner.main_window._dock_widgets["MDA"]
     panel = UnifiedMDAWidget(parent=owner.main_window, mmcore=owner.core)
     panel.setValue(value)
+    panel.control_btns.run_btn.setToolTip(
+        "FINAL HARDWARE STEP. Run the reviewed MDA using the prepared camera, "
+        "autofocus, stage-position, and Raman target settings. For live lipolysis, "
+        "only press this after field registration/tracking and image->galvo "
+        "validation are complete."
+    )
+    panel.control_btns.cancel_btn.setToolTip(
+        "Request cancellation of the active MDA. The current hardware event may "
+        "finish before the acquisition fully stops."
+    )
+    panel.control_btns.pause_btn.setToolTip(
+        "Pause/resume the active MDA between events when supported. This does not "
+        "rewrite the prepared lipid-droplet target identities."
+    )
     dock.setWidget(panel)
     old._disconnect()
     old.control_btns._disconnect()

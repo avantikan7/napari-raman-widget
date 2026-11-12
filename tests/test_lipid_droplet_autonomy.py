@@ -214,7 +214,10 @@ def test_prepare_raman_mda_builds_one_point_per_droplet_but_never_runs(
                     target(2, (30, 40), 120),
                     target(3, (50, 60), 140),
                 ]
-            }
+            },
+            "mapping_valid": True,
+            "mda_prepared": False,
+            "galvo_preview": [],
         },
         core=object(),
         main_window=object(),
@@ -236,3 +239,49 @@ def test_prepare_raman_mda_builds_one_point_per_droplet_but_never_runs(
     assert widget.selection_results["pre_acq"] is False
     apply_prepared.assert_called_once_with(widget)
     acquisition_run.assert_not_called()
+
+
+def test_field_registration_allows_moving_droplet_to_keep_identity():
+    """Protect live tracking when the whole adipocyte field translates in XY."""
+    from scipy import ndimage as ndi
+
+    baseline_image = np.zeros((96, 96), dtype=np.float32)
+    baseline_image[disk(baseline_image.shape, (30, 35), 6)] = 1.0
+    baseline_image[disk(baseline_image.shape, (65, 60), 8)] = 0.7
+    current_image = ndi.shift(
+        baseline_image, shift=(7, -5), order=1, mode="constant", cval=0.0
+    )
+
+    current_target = target(1, (37, 30), 92)
+    widget = SimpleNamespace(
+        _dry={
+            "baseline_image": baseline_image,
+            "stack": current_image[None],
+            "baseline": [
+                {
+                    "z": 0,
+                    "aim": np.array([30.0, 35.0]),
+                    "area": 100.0,
+                    "mean_intensity": 1.0,
+                }
+            ],
+            "all_targets": {0: [current_target]},
+            "targets": {0: [current_target]},
+            "field_shift_yx": None,
+            "registration_error": None,
+            "mapping_valid": False,
+            "mda_prepared": False,
+        },
+        dry_match_distance_input=Value(5.0),
+        dry_tracking_status=TextSink(),
+    )
+
+    assert dry_run._register_to_baseline(widget)
+    np.testing.assert_allclose(widget._dry["field_shift_yx"], [-7, 5], atol=0.25)
+
+    matches = dry_run._match_adaptive_targets(widget)
+    assert len(matches) == 1
+    assert matches[0]["raw_distance_px"] > 8
+    assert matches[0]["registered_distance_px"] < 0.5
+    assert matches[0]["area_change_pct"] == pytest.approx(-8.0)
+    assert matches[0]["tracking_confidence"] > 0.8
