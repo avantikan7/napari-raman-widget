@@ -463,6 +463,16 @@ class HardwareWidget(QWidget):
         self.wellplate_navigation = WellPlateNavigationPanel(self)
         navigation_layout.addWidget(self.wellplate_navigation)
         outer.addWidget(navigation_box)
+
+        from .dish_navigation import DishFieldNavigationPanel
+        dish_navigation_box = make_collapsible(
+            "Dish field navigation", expanded=False
+        )
+        dish_navigation_layout = QVBoxLayout(dish_navigation_box)
+        self.dish_navigation = DishFieldNavigationPanel(self)
+        dish_navigation_layout.addWidget(self.dish_navigation)
+        outer.addWidget(dish_navigation_box)
+
         autofocus_box = make_collapsible("Autofocus", expanded=True)
         autofocus_layout = QVBoxLayout(autofocus_box)
         outer.addWidget(autofocus_box)
