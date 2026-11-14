@@ -9,6 +9,8 @@ from __future__ import annotations
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
     QDockWidget,
+    QFrame,
+    QGridLayout,
     QGroupBox,
     QLabel,
     QMainWindow,
@@ -21,6 +23,57 @@ from qtpy.QtWidgets import (
 
 def _status_mark(done: bool) -> str:
     return "✓" if done else "○"
+
+
+_STATUS_COLORS = {
+    "ready": "#63D69A",
+    "attention": "#F2B85B",
+    "inactive": "#9AA3AF",
+    "error": "#F07878",
+}
+
+
+def _set_status_row(
+    owner,
+    key: str,
+    value: str,
+    level: str,
+    *,
+    badge: str | None = None,
+    badge_level: str = "inactive",
+) -> bool:
+    """Update one compact readiness row without touching microscope hardware."""
+    rows = getattr(owner, "lipiddrop_status_rows", None)
+    if not rows or key not in rows:
+        return False
+
+    row = rows[key]
+    color = _STATUS_COLORS.get(level, _STATUS_COLORS["inactive"])
+    row["dot"].setText("●")
+    row["dot"].setStyleSheet(f"QLabel {{ color: {color}; font-size: 13px; }}")
+    row["value"].setText(value)
+    row["value"].setStyleSheet(f"QLabel {{ color: {color}; font-weight: 600; }}")
+
+    badge_widget = row.get("badge")
+    if badge_widget is not None:
+        if badge is None:
+            badge_widget.hide()
+        else:
+            badge_color = _STATUS_COLORS.get(
+                badge_level, _STATUS_COLORS["inactive"]
+            )
+            badge_widget.setText(badge)
+            badge_widget.setStyleSheet(
+                "QLabel {"
+                f" color: {badge_color};"
+                f" border: 1px solid {badge_color};"
+                " border-radius: 7px;"
+                " padding: 1px 6px;"
+                " font-weight: 600;"
+                "}"
+            )
+            badge_widget.show()
+    return True
 
 
 def _qt_main_window(owner) -> QMainWindow | None:
@@ -39,14 +92,15 @@ def _dock_main_window(dock) -> QMainWindow | None:
 
 
 def refresh_control_hub(owner) -> None:
-    """Refresh the compact, hardware-free workflow state summary."""
-    label = getattr(owner, "lipiddrop_hub_status", None)
-    if label is None:
-        return
-
+    """Refresh the compact, hardware-free workflow readiness card."""
     connected = owner.core is not None
     objective = getattr(owner, "objective_combo", None)
-    objective_text = objective.currentText() if objective is not None else "unknown"
+    objective_text = objective.currentText() if objective is not None else ""
+    objective_ready = bool(
+        connected
+        and objective_text
+        and objective_text not in {"(connect first)", "(index unavailable)"}
+    )
     calibration = owner.vandermonde is not None
 
     fixed = getattr(owner, "_fixed", {}) or {}
@@ -62,19 +116,63 @@ def refresh_control_hub(owner) -> None:
     live_baseline = len(live.get("baseline") or [])
     live_prepared = bool(live.get("mda_prepared"))
 
-    label.setText(
-        f"{_status_mark(connected)} Microscope: "
-        f"{'connected' if connected else 'disconnected'}\n"
-        f"{_status_mark(objective_text not in {'(connect first)', '(index unavailable)', ''})} "
-        f"Objective: {objective_text}\n"
-        f"{_status_mark(calibration)} Pixel→stage calibration: "
-        f"{'valid' if calibration else 'not loaded'}\n"
-        f"{_status_mark(fixed_targets > 0)} 3D LD targets: {fixed_targets} | "
-        f"MDA prepared: {'yes' if fixed_prepared else 'no'}\n"
-        f"{_status_mark(live_baseline > 0)} LD tracking T0 identities: "
-        f"{live_baseline if live_baseline else 'not set'} | "
-        f"MDA prepared: {'yes' if live_prepared else 'no'}"
-    )
+    if getattr(owner, "lipiddrop_status_rows", None):
+        _set_status_row(
+            owner,
+            "microscope",
+            "Connected" if connected else "Offline",
+            "ready" if connected else "inactive",
+        )
+        _set_status_row(
+            owner,
+            "objective",
+            objective_text if objective_ready else "Connect microscope",
+            "ready" if objective_ready else "inactive",
+        )
+        _set_status_row(
+            owner,
+            "calibration",
+            "Loaded" if calibration else "Not loaded",
+            "ready" if calibration else ("attention" if connected else "inactive"),
+        )
+        _set_status_row(
+            owner,
+            "targets",
+            f"{fixed_targets} selected",
+            "ready" if fixed_targets else "inactive",
+            badge="MDA ready" if fixed_prepared else (
+                "MDA pending" if fixed_targets else "MDA not prepared"
+            ),
+            badge_level="ready" if fixed_prepared else (
+                "attention" if fixed_targets else "inactive"
+            ),
+        )
+        _set_status_row(
+            owner,
+            "tracking",
+            f"T0: {live_baseline} identities" if live_baseline else "T0 not set",
+            "ready" if live_baseline else "inactive",
+            badge="MDA ready" if live_prepared else (
+                "MDA pending" if live_baseline else "MDA not prepared"
+            ),
+            badge_level="ready" if live_prepared else (
+                "attention" if live_baseline else "inactive"
+            ),
+        )
+
+    # Compatibility text for tests or minimal viewer stubs that do not build rows.
+    label = getattr(owner, "lipiddrop_hub_status", None)
+    if label is not None:
+        label.setText(
+            f"Microscope: {'Connected' if connected else 'Offline'}\n"
+            f"Objective: {objective_text if objective_ready else 'Connect microscope'}\n"
+            f"Pixel→stage: {'Loaded' if calibration else 'Not loaded'}\n"
+            f"3D LD targeting: {fixed_targets} selected | "
+            f"MDA: {'ready' if fixed_prepared else 'not prepared'}\n"
+            f"LD tracking: "
+            f"{'T0 ' + str(live_baseline) if live_baseline else 'T0 not set'} | "
+            f"MDA: {'ready' if live_prepared else 'not prepared'}"
+        )
 
 
 def _lock_workflow_dock(dock: QDockWidget) -> None:
@@ -189,16 +287,59 @@ def build_control_hub(owner) -> QGroupBox:
     )
     layout.addWidget(note)
 
+    card = QFrame()
+    card.setObjectName("lipiddropReadinessCard")
+    card.setFrameShape(QFrame.StyledPanel)
+    card.setStyleSheet(
+        "QFrame#lipiddropReadinessCard {"
+        " border: 1px solid palette(mid);"
+        " border-radius: 5px;"
+        " padding: 4px;"
+        "}"
+    )
+    grid = QGridLayout(card)
+    grid.setContentsMargins(8, 7, 8, 7)
+    grid.setHorizontalSpacing(8)
+    grid.setVerticalSpacing(5)
+    grid.setColumnStretch(1, 1)
+
+    owner.lipiddrop_status_rows = {}
+
+    def add_row(row_index, key, title, tooltip, with_badge=False):
+        dot = QLabel("●")
+        dot.setFixedWidth(14)
+        title_label = QLabel(title)
+        title_label.setStyleSheet("QLabel { font-weight: 600; }")
+        value = QLabel()
+        value.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        badge = QLabel() if with_badge else None
+        if badge is not None:
+            badge.setAlignment(Qt.AlignCenter)
+        for widget in (dot, title_label, value, badge):
+            if widget is not None:
+                widget.setToolTip(tooltip)
+        grid.addWidget(dot, row_index, 0)
+        grid.addWidget(title_label, row_index, 1)
+        grid.addWidget(value, row_index, 2)
+        if badge is not None:
+            grid.addWidget(badge, row_index, 3)
+        owner.lipiddrop_status_rows[key] = {
+            "dot": dot,
+            "title": title_label,
+            "value": value,
+            "badge": badge,
+        }
+
+    add_row(0, "microscope", "Microscope", "Connection state only; this indicator never connects or moves hardware.")
+    add_row(1, "objective", "Objective", "Active objective reported by the connected IX83 configuration.")
+    add_row(2, "calibration", "Pixel→stage", "Whether a current-objective Vandermonde calibration is loaded.")
+    add_row(3, "targets", "3D LD targeting", "Number of reviewed 3D LD targets and whether they have been handed to MDA.", True)
+    add_row(4, "tracking", "LD tracking", "Whether T0 identities exist and whether revisit targets have been handed to MDA.", True)
+    layout.addWidget(card)
+
+    # Retain a hidden text representation for minimal test stubs and accessibility.
     owner.lipiddrop_hub_status = QLabel()
-    owner.lipiddrop_hub_status.setWordWrap(True)
-    owner.lipiddrop_hub_status.setStyleSheet(
-        "QLabel { border: 1px solid palette(mid); padding: 6px; "
-        "font-family: monospace; }"
-    )
-    owner.lipiddrop_hub_status.setToolTip(
-        "Read-only in-memory workflow state. It does not query or command "
-        "microscope hardware."
-    )
+    owner.lipiddrop_hub_status.hide()
     layout.addWidget(owner.lipiddrop_hub_status)
 
     refresh_control_hub(owner)

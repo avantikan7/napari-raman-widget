@@ -36,6 +36,29 @@ def test_lipid_workflows_are_real_dock_tabs_and_hardware_controls_remain(qt_app)
         assert widget._fixed_workflow_dock.windowTitle() == "3D LD Targeting"
         assert widget._live_workflow_dock.windowTitle() == "LD Tracking"
 
+        # Commercial-style readiness card exposes state as compact rows.
+        assert set(widget.lipiddrop_status_rows) == {
+            "microscope", "objective", "calibration", "targets", "tracking"
+        }
+        assert widget.lipiddrop_status_rows["microscope"]["value"].text() == "Offline"
+        assert widget.lipiddrop_status_rows["objective"]["value"].text() == "Connect microscope"
+        assert widget.lipiddrop_status_rows["calibration"]["value"].text() == "Not loaded"
+        assert widget.lipiddrop_status_rows["targets"]["value"].text() == "0 selected"
+        assert widget.lipiddrop_status_rows["targets"]["badge"].text() == "MDA not prepared"
+        assert widget.lipiddrop_status_rows["tracking"]["value"].text() == "T0 not set"
+
+        # Basic mode shows one automatic active scale; manual override is Expert-only.
+        assert widget.fixed_pixel_input.isHidden()
+        assert widget.fixed_pixel_label.isHidden()
+        assert "Config-calibrated reference" in widget.fixed_scale_status.text()
+        widget.fixed_interface_mode.setCurrentText("Expert")
+        qt_app.processEvents()
+        assert not widget.fixed_pixel_input.isHidden()
+        assert not widget.fixed_pixel_label.isHidden()
+        widget.fixed_interface_mode.setCurrentText("Basic")
+        qt_app.processEvents()
+        assert widget.fixed_pixel_input.isHidden()
+
         # Existing hardware actions are still the original HardwareWidget controls.
         for name in (
             "connect_btn",

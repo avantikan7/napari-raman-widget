@@ -31,6 +31,13 @@ GRID = "fixed-cell intra-LD Raman grid"
 CELLMASK = "fixed-cell CellMask Orange"
 CELLS = "fixed-cell whole-cell masks"
 
+# Micro-Manager config stores a calibrated 60× reference of 0.1083 µm/px.
+# Converting that reference to 40× with 2×2 binning gives 0.3249 µm/px.
+CONFIG_REFERENCE_PIXEL_UM = 0.325
+CONFIG_REFERENCE_DESCRIPTION = (
+    "config-calibrated reference (60× calibration → 40×, 2×2 binning)"
+)
+
 
 @dataclass(frozen=True)
 class PixelScale:
@@ -363,8 +370,11 @@ def _refresh_mda_summary(owner):
 
 
 def _objective_scale(owner):
-    fallback = float(owner.fixed_pixel_input.value())
+    """Choose one active scale and report its provenance, not a menu of sources."""
+    reference = float(owner.fixed_pixel_input.value())
     objective = owner._current_objective() if owner.core is not None else None
+
+    # Highest-confidence source: objective-specific measured pixel→stage model.
     if owner.fixed_auto_scale_check.isChecked() and owner.core is not None:
         try:
             current = owner._ensure_current_vandermonde()
@@ -376,24 +386,48 @@ def _objective_scale(owner):
                     float(fov_x) / float(width),
                     float(fov_y) / float(height),
                     str(current),
-                    "objective-specific Vandermonde calibration",
+                    "objective-specific pixel→stage calibration",
                 )
                 owner._fixed["pixel_scale"] = scale
                 owner.fixed_scale_status.setText(
-                    f"Objective index {current}: X={scale.x_um:.4f}, "
-                    f"Y={scale.y_um:.4f} µm/px; camera binning must match."
+                    f"X {scale.x_um:.4f} | Y {scale.y_um:.4f} µm/px  ·  "
+                    f"Direct objective calibration (index {current})"
+                )
+                owner.fixed_scale_status.setToolTip(
+                    "Measured from the active objective's pixel-to-stage "
+                    "Vandermonde calibration. Camera binning must match the "
+                    "calibration acquisition."
                 )
                 _update_physical_summary(owner)
                 return scale
         except Exception as error:
-            owner.fixed_scale_status.setText(
-                f"Objective calibration unavailable ({error}); using fallback."
+            owner.fixed_scale_status.setToolTip(
+                f"Direct objective calibration was unavailable: {error}"
             )
-    scale = PixelScale(fallback, fallback, objective, "manual fallback")
+
+    # The default 0.325 value is not an arbitrary estimate: it is derived from
+    # the calibrated 60× config reference for the 40×, 2×2 acquisition state.
+    is_config_reference = abs(reference - CONFIG_REFERENCE_PIXEL_UM) < 5e-6
+    source = (
+        CONFIG_REFERENCE_DESCRIPTION
+        if is_config_reference
+        else "manual Expert-mode override"
+    )
+    scale = PixelScale(reference, reference, objective, source)
     owner._fixed["pixel_scale"] = scale
     owner.fixed_scale_status.setText(
-        f"Fallback scale: {fallback:.4f} µm/px"
-        + (f" for objective index {objective}" if objective else "")
+        f"{reference:.4f} µm/px  ·  "
+        f"{'Config-calibrated reference' if is_config_reference else 'Manual override'}"
+    )
+    owner.fixed_scale_status.setToolTip(
+        (
+            "The loaded Micro-Manager config stores a calibrated 60× value of "
+            "0.1083 µm/px. Converted to 40× with 2×2 binning, this is "
+            "0.3249 ≈ 0.325 µm/px. A direct objective-specific Vandermonde "
+            "calibration supersedes it when available."
+        )
+        if is_config_reference
+        else "User-entered pixel-size override; direct objective calibration is preferred."
     )
     _update_physical_summary(owner)
     return scale
@@ -970,26 +1004,30 @@ def build_fixed_cell_controls(owner):
     scale_group = QGroupBox("Objective calibration and physical LD size")
     scale_form = QFormLayout(scale_group)
     owner.fixed_auto_scale_check = QCheckBox(
-        "Use active objective's pixel-to-stage calibration"
+        "Use automatic pixel scale source (recommended)"
     )
     owner.fixed_auto_scale_check.setChecked(True)
     owner.fixed_auto_scale_check.setToolTip(
-        "Recommended. Read the current IX83 objective state and its "
-        "Vandermonde model, then calculate X/Y µm per pixel. The turret is not moved."
+        "Use the direct objective-specific pixel→stage calibration when available; "
+        "otherwise use the calibrated config reference. The turret is not moved."
     )
     scale_form.addRow(owner.fixed_auto_scale_check)
 
     owner.fixed_pixel_input = QDoubleSpinBox()
     owner.fixed_pixel_input.setRange(0.001, 20.0)
     owner.fixed_pixel_input.setDecimals(5)
-    owner.fixed_pixel_input.setValue(0.325)
+    owner.fixed_pixel_input.setValue(CONFIG_REFERENCE_PIXEL_UM)
     owner.fixed_pixel_input.setSuffix(" µm/px")
     owner.fixed_pixel_input.setToolTip(
-        "Manual fallback only. Koseki's current 40× estimate is 0.325 µm/px."
+        "Default is the config-calibrated 40×, 2×2 reference. Change only as an Expert-mode override."
     )
-    scale_form.addRow("Fallback pixel size", owner.fixed_pixel_input)
+    owner.fixed_pixel_label = QLabel("Reference / override")
+    owner.fixed_pixel_label.setToolTip(
+        "Expert-only override. Basic mode uses automatic source selection."
+    )
+    scale_form.addRow(owner.fixed_pixel_label, owner.fixed_pixel_input)
 
-    owner.fixed_scale_btn = QPushButton("Read active objective calibration")
+    owner.fixed_scale_btn = QPushButton("Refresh active pixel scale")
     owner.fixed_scale_btn.setToolTip(
         "Read the active objective index and calculate X/Y µm-per-pixel. "
         "No objective or stage motion."
@@ -999,7 +1037,9 @@ def build_fixed_cell_controls(owner):
     )
     scale_form.addRow(owner.fixed_scale_btn)
 
-    owner.fixed_scale_status = QLabel("Objective scale not read yet.")
+    owner.fixed_scale_status = QLabel(
+        "0.3250 µm/px  ·  Config-calibrated reference"
+    )
     owner.fixed_scale_status.setWordWrap(True)
     scale_form.addRow(owner.fixed_scale_status)
 
@@ -1405,7 +1445,10 @@ def build_fixed_cell_controls(owner):
     )
 
     def _set_interface_mode(text):
-        owner.fixed_advanced_box.setVisible(text == "Expert")
+        expert = text == "Expert"
+        owner.fixed_advanced_box.setVisible(expert)
+        owner.fixed_pixel_label.setVisible(expert)
+        owner.fixed_pixel_input.setVisible(expert)
 
     owner.fixed_interface_mode.currentTextChanged.connect(_set_interface_mode)
     _set_interface_mode(owner.fixed_interface_mode.currentText())
