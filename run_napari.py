@@ -66,6 +66,48 @@ def _apply_windows_native_icon(qt_window, icon_path: Path) -> None:
     qt_window._lipiddrop_icon_handles = (big, small)
 
 
+def _apply_windows_shell_identity(qt_window, icon_path: Path) -> None:
+    """Advertise LipidDrop's taskbar identity and relaunch icon to Explorer."""
+    if sys.platform != "win32":
+        return
+
+    try:
+        import pythoncom
+        from win32com.propsys import propsys, pscon
+
+        store = propsys.SHGetPropertyStoreForWindow(
+            int(qt_window.winId()), propsys.IID_IPropertyStore
+        )
+        launch_command = (
+            f'"{Path(sys.executable).resolve()}" '
+            f'"{Path(__file__).resolve()}"'
+        )
+        # Microsoft recommends setting relaunch metadata before the AppUserModelID.
+        store.SetValue(
+            pscon.PKEY_AppUserModel_RelaunchCommand,
+            propsys.PROPVARIANTType(launch_command, pythoncom.VT_ILLEGAL),
+        )
+        store.SetValue(
+            pscon.PKEY_AppUserModel_RelaunchIconResource,
+            propsys.PROPVARIANTType(
+                f"{Path(icon_path).resolve()},0", pythoncom.VT_ILLEGAL
+            ),
+        )
+        store.SetValue(
+            pscon.PKEY_AppUserModel_ID,
+            propsys.PROPVARIANTType(APP_ID, pythoncom.VT_ILLEGAL),
+        )
+        store.Commit()
+        qt_window._lipiddrop_shell_identity = (
+            APP_ID,
+            launch_command,
+            str(Path(icon_path).resolve()),
+        )
+    except Exception as error:
+        # The custom Qt/native icon still applies if Windows property APIs fail.
+        print(f"[LipidDrop taskbar identity] {error}")
+
+
 if __name__ == "__main__":
     viewer = napari.Viewer()
     viewer.axes.visible = False  # napari-micromanager axes crash workaround
@@ -108,8 +150,13 @@ if __name__ == "__main__":
     # Napari/Qt may update the native window during startup, so apply the native
     # taskbar icon once now and once again after the event loop begins.
     _apply_windows_native_icon(qt_window, icon_path)
+    _apply_windows_shell_identity(qt_window, icon_path)
     QTimer.singleShot(
-        0, lambda: _apply_windows_native_icon(qt_window, icon_path)
+        0,
+        lambda: (
+            _apply_windows_native_icon(qt_window, icon_path),
+            _apply_windows_shell_identity(qt_window, icon_path),
+        ),
     )
 
     napari.run()
