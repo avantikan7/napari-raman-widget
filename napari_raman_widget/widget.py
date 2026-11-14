@@ -1295,6 +1295,14 @@ class HardwareWidget(QWidget):
         self.apply_mda_positions_btn = QPushButton("Apply prepared positions to MDA")
         self.apply_mda_positions_btn.clicked.connect(lambda: apply_prepared_positions(self))
         sel_layout.addWidget(self.apply_mda_positions_btn)
+
+        # Koseki validation path: fixed cells, native MDA Z-stack, per-LD
+        # best-focus selection, physical size limits, CellMask assignment and
+        # objective-calibrated stage targeting. The live loop remains below.
+        from .fixed_cell import build_fixed_cell_controls
+        self.fixed_cell_box = build_fixed_cell_controls(self)
+        outer.addWidget(self.fixed_cell_box)
+
         from .dry_run import build_dry_run_controls
         self.dry_run_box = build_dry_run_controls(self)
         outer.addWidget(self.dry_run_box)
