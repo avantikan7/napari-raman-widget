@@ -82,26 +82,42 @@ def _watershed_masks(plane, background_sigma=12.0, min_distance=3, threshold_sca
 
 
 def build_dry_run_controls(widget):
-    """Create the live-lipolysis targeting loop and attach it to the widget."""
+    """Create the four-step experimental live-lipolysis workflow."""
     from qtpy.QtWidgets import QGroupBox
 
-    box = make_collapsible(
-        "Live lipolysis loop: image -> track -> Raman", expanded=False
+    box = make_collapsible("Live Lipolysis Tracker (experimental)", expanded=True)
+    lay = QVBoxLayout(box)
+
+    warning = QLabel(
+        "EXPERIMENTAL LIVE MODE — use after fixed-cell stage targeting has been validated."
     )
-    lay = QVBoxLayout()
+    warning.setWordWrap(True)
+    warning.setStyleSheet(
+        "QLabel { border: 1px solid #b78103; padding: 6px; font-weight: bold; }"
+    )
+    warning.setToolTip(
+        "This preserves the existing live workflow. It does not alter Jeff's "
+        "Autofocus, MDA, stage, galvo, shutter, filter or laser controls."
+    )
+    lay.addWidget(warning)
 
     intro = QLabel(
-        "Biology layer for live adipocyte experiments. This panel decides which "
-        "lipid droplets to revisit; Jeff's Autofocus and MDA panels remain the "
-        "authoritative hardware/acquisition controls."
+        "Baseline → Track → Analyze → Revisit. This panel selects biological "
+        "targets; Jeff's shared MDA remains authoritative for acquisition and Run."
     )
     intro.setWordWrap(True)
-    intro.setToolTip(
-        "Loop: image -> segment -> review -> set baseline -> re-image -> "
-        "register field -> match droplets -> rank biological change -> "
-        "autofocus -> validate Raman mapping -> prepare MDA -> Run in Jeff's MDA panel."
-    )
     lay.addWidget(intro)
+
+    mode_row = QHBoxLayout()
+    mode_row.addWidget(QLabel("Interface:"))
+    widget.dry_interface_mode = QComboBox()
+    widget.dry_interface_mode.addItems(["Basic", "Expert"])
+    widget.dry_interface_mode.setToolTip(
+        "Basic hides low-level segmentation parameters. Expert reveals the "
+        "watershed, Cellpose, pixel-area and interior-margin controls."
+    )
+    mode_row.addWidget(widget.dry_interface_mode)
+    lay.addLayout(mode_row)
 
     widget.dry_state_label = QLabel()
     widget.dry_state_label.setWordWrap(True)
@@ -110,8 +126,8 @@ def build_dry_run_controls(widget):
         "font-family: monospace; }"
     )
     widget.dry_state_label.setToolTip(
-        "Live state summary. A new image, segmentation, curation change, or "
-        "adaptive re-ranking invalidates the old galvo validation and prepared MDA."
+        "Live state summary. New images, segmentation or curation changes "
+        "invalidate previous mapping validation and MDA preparation."
     )
     lay.addWidget(widget.dry_state_label)
 
@@ -125,20 +141,28 @@ def build_dry_run_controls(widget):
         lay.addWidget(group)
         return glay
 
+    def subgroup(parent_layout, title):
+        group = QGroupBox(title)
+        glay = QVBoxLayout(group)
+        parent_layout.addWidget(group)
+        return glay
+
     def row(layout, label, control):
         r = QHBoxLayout()
         r.addWidget(QLabel(label))
         r.addWidget(control)
         layout.addLayout(r)
 
-    seg = step(
-        "1 - Image + segment lipid droplets",
-        "Load the current BODIPY frame or Z-stack, then segment candidate droplets.",
-        "For repeated lipolysis imaging, keep acquisition settings comparable across "
-        "timepoints. Segmentation creates candidates only; Raman targets are chosen "
-        "after QC in Step 2.",
+    # ---------------- 1. BASELINE ----------------
+    baseline = step(
+        "1 — Baseline",
+        "Acquire or select T0, segment candidate LDs, review safe targets and "
+        "store the accepted identities.",
+        "T0 stores the reference field image plus accepted droplet measurements. "
+        "Later frames are registered before one-to-one matching.",
     )
 
+    seg = subgroup(baseline, "Acquire/select T0 and segment LDs")
     engine_row = QHBoxLayout()
     engine_row.addWidget(QLabel("Segmentation engine:"))
     widget.dry_engine_combo = QComboBox()
@@ -170,23 +194,6 @@ def build_dry_run_controls(widget):
     model_row.addWidget(widget.dry_cellpose_browse)
     seg.addLayout(model_row)
 
-    widget.dry_ws_bg_input = QDoubleSpinBox()
-    widget.dry_ws_bg_input.setRange(1.0, 100.0)
-    widget.dry_ws_bg_input.setValue(12.0)
-    widget.dry_ws_bg_input.setSingleStep(1.0)
-    row(seg, "Watershed background sigma (px):", widget.dry_ws_bg_input)
-
-    widget.dry_ws_distance_input = QSpinBox()
-    widget.dry_ws_distance_input.setRange(1, 100)
-    widget.dry_ws_distance_input.setValue(4)
-    row(seg, "Watershed min peak distance (px):", widget.dry_ws_distance_input)
-
-    widget.dry_ws_threshold_input = QDoubleSpinBox()
-    widget.dry_ws_threshold_input.setRange(0.25, 4.0)
-    widget.dry_ws_threshold_input.setValue(1.0)
-    widget.dry_ws_threshold_input.setSingleStep(0.05)
-    row(seg, "Watershed threshold scale:", widget.dry_ws_threshold_input)
-
     open_row = QHBoxLayout()
     widget.dry_open_btn = QPushButton("Open image / z-stack...")
     widget.dry_channel_input = QSpinBox()
@@ -200,56 +207,79 @@ def build_dry_run_controls(widget):
     widget.dry_layer_btn = QPushButton("Use selected image layer")
     seg.addWidget(widget.dry_layer_btn)
 
+    widget.dry_advanced_box = make_collapsible(
+        "Advanced segmentation parameters", expanded=False
+    )
+    advanced_layout = QVBoxLayout(widget.dry_advanced_box)
+
+    widget.dry_ws_bg_input = QDoubleSpinBox()
+    widget.dry_ws_bg_input.setRange(1.0, 100.0)
+    widget.dry_ws_bg_input.setValue(12.0)
+    widget.dry_ws_bg_input.setSingleStep(1.0)
+    row(advanced_layout, "Watershed background sigma (px):", widget.dry_ws_bg_input)
+
+    widget.dry_ws_distance_input = QSpinBox()
+    widget.dry_ws_distance_input.setRange(1, 100)
+    widget.dry_ws_distance_input.setValue(4)
+    row(advanced_layout, "Watershed min peak distance (px):", widget.dry_ws_distance_input)
+
+    widget.dry_ws_threshold_input = QDoubleSpinBox()
+    widget.dry_ws_threshold_input.setRange(0.25, 4.0)
+    widget.dry_ws_threshold_input.setValue(1.0)
+    widget.dry_ws_threshold_input.setSingleStep(0.05)
+    row(advanced_layout, "Watershed threshold scale:", widget.dry_ws_threshold_input)
+
     widget.dry_rel_input = QDoubleSpinBox()
     widget.dry_rel_input.setRange(0.0, 1.0)
     widget.dry_rel_input.setSingleStep(0.05)
     widget.dry_rel_input.setValue(0.10)
-    row(seg, "Min relative intensity:", widget.dry_rel_input)
+    row(advanced_layout, "Min relative intensity:", widget.dry_rel_input)
 
     widget.dry_diameter_input = QDoubleSpinBox()
     widget.dry_diameter_input.setRange(0.0, 500.0)
     widget.dry_diameter_input.setValue(0.0)
     widget.dry_diameter_input.setSpecialValueText("Auto (model default)")
-    row(seg, "Droplet diameter (px):", widget.dry_diameter_input)
+    row(advanced_layout, "Droplet diameter (px):", widget.dry_diameter_input)
 
     widget.dry_minarea_input = QSpinBox()
     widget.dry_minarea_input.setRange(1, 10_000_000)
     widget.dry_minarea_input.setSingleStep(10)
     widget.dry_minarea_input.setValue(50)
-    row(seg, "Min droplet area (px):", widget.dry_minarea_input)
+    row(advanced_layout, "Min droplet area (px):", widget.dry_minarea_input)
 
     widget.dry_flow_input = QDoubleSpinBox()
     widget.dry_flow_input.setRange(0.0, 3.0)
     widget.dry_flow_input.setSingleStep(0.05)
     widget.dry_flow_input.setValue(0.4)
-    row(seg, "Cellpose flow threshold:", widget.dry_flow_input)
+    row(advanced_layout, "Cellpose flow threshold:", widget.dry_flow_input)
 
     widget.dry_cellprob_input = QDoubleSpinBox()
     widget.dry_cellprob_input.setRange(-10.0, 10.0)
     widget.dry_cellprob_input.setSingleStep(0.25)
     widget.dry_cellprob_input.setValue(0.0)
-    row(seg, "Cellpose probability threshold:", widget.dry_cellprob_input)
+    row(advanced_layout, "Cellpose probability threshold:", widget.dry_cellprob_input)
 
     widget.dry_maxarea_input = QSpinBox()
     widget.dry_maxarea_input.setRange(0, 10_000_000)
     widget.dry_maxarea_input.setSingleStep(500)
     widget.dry_maxarea_input.setValue(3000)
     widget.dry_maxarea_input.setSpecialValueText("No limit")
-    row(seg, "Max droplet area (px):", widget.dry_maxarea_input)
+    row(advanced_layout, "Max droplet area (px):", widget.dry_maxarea_input)
 
     widget.dry_density_input = QSpinBox()
     widget.dry_density_input.setRange(1, 500)
     widget.dry_density_input.setValue(6)
-    row(seg, "Grid spacing (px):", widget.dry_density_input)
+    row(advanced_layout, "Grid spacing (px):", widget.dry_density_input)
 
     widget.dry_margin_input = QDoubleSpinBox()
     widget.dry_margin_input.setRange(0.0, 100.0)
     widget.dry_margin_input.setValue(4.0)
-    row(seg, "Safe interior margin (px):", widget.dry_margin_input)
+    row(advanced_layout, "Safe interior margin (px):", widget.dry_margin_input)
 
     widget.dry_link_check = QCheckBox("Link droplets across Z (same object)")
     widget.dry_link_check.setChecked(True)
-    seg.addWidget(widget.dry_link_check)
+    advanced_layout.addWidget(widget.dry_link_check)
+    seg.addWidget(widget.dry_advanced_box)
 
     btn_row = QHBoxLayout()
     widget.dry_plane_btn = QPushButton("Segment current plane")
@@ -258,21 +288,13 @@ def build_dry_run_controls(widget):
     btn_row.addWidget(widget.dry_all_btn)
     seg.addLayout(btn_row)
 
-    qc = step(
-        "2 - Review targets + set the baseline population",
-        "Keep only trustworthy droplets. The pilot limiter intentionally prefers "
-        "large, bright droplets with the deepest safe interior Raman aim point.",
-        "The default ranking is conservative: larger inscribed radius first, then "
-        "BODIPY intensity, then area. This is for targeting safety, not biology.",
-    )
-
+    qc = subgroup(baseline, "Review T0 targets and set identities")
     legend = QLabel(
         "Overlay legend: red = Raman aim | gray = held/rejected | "
         "magenta = changing revisit | cyan = stable-control revisit"
     )
     legend.setWordWrap(True)
     legend.setToolTip(
-        "Colors are fixed so timepoint comparisons stay readable. "
         "Stable means morphology-stable after tracking, not spatially stationary."
     )
     qc.addWidget(legend)
@@ -302,16 +324,16 @@ def build_dry_run_controls(widget):
     widget.dry_reset_btn = QPushButton("Reset acceptance")
     qc.addWidget(widget.dry_reset_btn)
 
-    widget.dry_baseline_btn = QPushButton("Set accepted targets as T0 baseline")
+    widget.dry_baseline_btn = QPushButton("Set accepted targets as T0 identities")
+    widget.dry_baseline_btn.setMinimumHeight(34)
     qc.addWidget(widget.dry_baseline_btn)
 
+    # ---------------- 2. TRACK ----------------
     track = step(
-        "3 - Live lipolysis tracking + Raman revisit",
-        "For T1/T2/T3: register the whole field to T0, match droplets one-to-one, "
-        "then rank morphology change. Movement alone is not called lipolysis.",
-        "Field registration corrects global XY drift first. Matching uses registered "
-        "distance plus weak area/intensity consistency terms and a one-to-one global "
-        "assignment. Classification then uses morphology change, not displacement.",
+        "2 — Track",
+        "Register the current field to T0 and match the same droplets one-to-one.",
+        "Whole-field registration corrects XY drift first. Matching then uses "
+        "registered distance plus weak area/intensity consistency terms."
     )
 
     widget.dry_register_btn = QPushButton("Register current frame to T0 baseline")
@@ -328,17 +350,25 @@ def build_dry_run_controls(widget):
     widget.dry_match_distance_input.setSingleStep(1.0)
     row(track, "Max registered match distance (px):", widget.dry_match_distance_input)
 
+    # ---------------- 3. ANALYZE ----------------
+    analyze = step(
+        "3 — Analyze response",
+        "Quantify morphology change, rank responders and retain morphology-stable controls.",
+        "Movement alone is not called lipolysis. Classification uses registered, "
+        "identity-matched morphology change."
+    )
+
     widget.dry_change_threshold_input = QDoubleSpinBox()
     widget.dry_change_threshold_input.setRange(0.0, 500.0)
     widget.dry_change_threshold_input.setValue(15.0)
     widget.dry_change_threshold_input.setSingleStep(1.0)
-    row(track, "Changing if |area change| >= (%):", widget.dry_change_threshold_input)
+    row(analyze, "Changing if |area change| >= (%):", widget.dry_change_threshold_input)
 
     widget.dry_stable_threshold_input = QDoubleSpinBox()
     widget.dry_stable_threshold_input.setRange(0.0, 100.0)
     widget.dry_stable_threshold_input.setValue(5.0)
     widget.dry_stable_threshold_input.setSingleStep(1.0)
-    row(track, "Stable control if |area change| <= (%):", widget.dry_stable_threshold_input)
+    row(analyze, "Stable control if |area change| <= (%):", widget.dry_stable_threshold_input)
 
     adaptive_count_row = QHBoxLayout()
     adaptive_count_row.addWidget(QLabel("Changing targets:"))
@@ -351,92 +381,81 @@ def build_dry_run_controls(widget):
     widget.dry_stable_count_input.setRange(0, 1000)
     widget.dry_stable_count_input.setValue(2)
     adaptive_count_row.addWidget(widget.dry_stable_count_input)
-    track.addLayout(adaptive_count_row)
+    analyze.addLayout(adaptive_count_row)
 
     widget.dry_auto_adaptive_check = QCheckBox(
         "Auto-register + re-rank after each new segmentation when T0 exists"
     )
     widget.dry_auto_adaptive_check.setChecked(True)
-    track.addWidget(widget.dry_auto_adaptive_check)
+    analyze.addWidget(widget.dry_auto_adaptive_check)
 
     widget.dry_prioritize_btn = QPushButton(
-        "Match + prioritize changing droplets and stable controls"
+        "Match + rank responders and stable controls"
     )
-    track.addWidget(widget.dry_prioritize_btn)
+    widget.dry_prioritize_btn.setMinimumHeight(34)
+    analyze.addWidget(widget.dry_prioritize_btn)
 
     widget.dry_adaptive_status = QLabel("No live-tracking baseline set")
     widget.dry_adaptive_status.setWordWrap(True)
-    track.addWidget(widget.dry_adaptive_status)
+    analyze.addWidget(widget.dry_adaptive_status)
 
     math_note = QLabel(
-        "Current response metric: %dA = 100 x (A_t - A_0) / A_0. "
-        "Planned volume proxy for spherical droplets: V ~ pi*d^3/6; "
-        "lipolytic flux ~ dV/dt."
+        "Current response metric: %dA = 100 × (A_t − A_0) / A_0. "
+        "Planned spherical volume proxy: V ≈ πd³/6; lipolytic flux ≈ dV/dt."
     )
     math_note.setWordWrap(True)
     math_note.setToolTip(
-        "Area change is currently used only as a morphology response score. "
-        "It should not be called biochemical lipolysis until volume/flux and "
-        "tracking have been validated."
+        "Area change is a morphology response score. Do not call it biochemical "
+        "lipolysis until tracking and volume/flux measurements are validated."
     )
-    track.addWidget(math_note)
+    analyze.addWidget(math_note)
 
-    handoff = step(
-        "4 - Autofocus + Raman handoff",
-        "Use Jeff's Autofocus/MDA controls for focus and acquisition. This panel "
-        "only supplies curated lipid-droplet coordinates.",
-        "Recommended loop: choose/validate a stable autofocus reference for the FOV "
-        "(or use Jeff's automatic low-structure patch selection), autofocus, then "
-        "validate image-to-galvo mapping, prepare the MDA, review Jeff's MDA summary, "
-        "and press Run there.",
+    # ---------------- 4. REVISIT ----------------
+    revisit = step(
+        "4 — Revisit",
+        "Choose responders and stable controls, then prepare their Raman targets "
+        "for Jeff's shared MDA.",
+        "The shared MDA remains responsible for Autofocus, acquisition settings, "
+        "saving, Run and Cancel."
     )
 
     af_note = QLabel(
-        "Autofocus reference: do NOT use a lipid droplet that may shrink/disappear. "
-        "Jeff's automatic laser-AF mode searches for a large low-structure / empty "
-        "patch with enough clearance; manual references should likewise be stable "
-        "and separate from the changing droplets."
+        "Autofocus reference: do not use an LD that may shrink or disappear. "
+        "Use a stable low-structure region or Jeff's automatic reference selection."
     )
     af_note.setWordWrap(True)
-    af_note.setToolTip(
-        "Automatic focus selection masks structured BF/fluorescent regions, computes "
-        "clearance from occupied pixels, and chooses the largest low-structure patch "
-        "above the minimum radius. The laser autofocus then searches Z and requires "
-        "a bracketed focus-score peak before accepting a new baseline Z."
-    )
-    handoff.addWidget(af_note)
+    revisit.addWidget(af_note)
 
     widget.dry_best_check = QCheckBox("Best plane per droplet only")
     widget.dry_best_check.setChecked(True)
-    handoff.addWidget(widget.dry_best_check)
+    revisit.addWidget(widget.dry_best_check)
 
     pos_row = QHBoxLayout()
     pos_row.addWidget(QLabel("Stage position index:"))
     widget.dry_pos_input = QSpinBox()
     widget.dry_pos_input.setRange(0, 100000)
     pos_row.addWidget(widget.dry_pos_input)
-    handoff.addLayout(pos_row)
+    revisit.addLayout(pos_row)
 
     widget.dry_validate_map_btn = QPushButton(
-        "Validate image -> galvo mapping (math only; no motion)"
+        "Validate image → galvo mapping (math only; no motion)"
     )
-    handoff.addWidget(widget.dry_validate_map_btn)
+    revisit.addWidget(widget.dry_validate_map_btn)
 
     widget.dry_prepare_mda_btn = QPushButton(
-        "Prepare curated droplets for Jeff's Raman MDA"
+        "Send revisit targets to shared Raman MDA"
     )
     widget.dry_prepare_mda_btn.setEnabled(False)
-    handoff.addWidget(widget.dry_prepare_mda_btn)
+    revisit.addWidget(widget.dry_prepare_mda_btn)
 
     widget.dry_export_btn = QPushButton("Export target + tracking table (CSV)")
-    handoff.addWidget(widget.dry_export_btn)
+    revisit.addWidget(widget.dry_export_btn)
 
     loop_note = QLabel(
-        "Repeat for the next timepoint: autofocus / image -> register -> track -> "
-        "rank -> Raman responders + stable controls."
+        "At the next timepoint: image → register → track → analyze → revisit."
     )
     loop_note.setWordWrap(True)
-    handoff.addWidget(loop_note)
+    revisit.addWidget(loop_note)
 
     widget.dry_send_btn = QPushButton("Legacy: send to selected cell layer")
     widget.dry_send_btn.hide()
@@ -444,7 +463,6 @@ def build_dry_run_controls(widget):
     widget.dry_status = QLabel("")
     widget.dry_status.setWordWrap(True)
     lay.addWidget(widget.dry_status)
-    box.setLayout(lay)
 
     widget._dry = {
         "stack": None,
@@ -504,6 +522,12 @@ def build_dry_run_controls(widget):
     widget.dry_limit_input.valueChanged.connect(
         lambda _=0: _apply_pilot_limit(widget)
     )
+
+    def _set_interface_mode(text):
+        widget.dry_advanced_box.setVisible(text == "Expert")
+
+    widget.dry_interface_mode.currentTextChanged.connect(_set_interface_mode)
+    _set_interface_mode(widget.dry_interface_mode.currentText())
     _update_state_summary(widget)
     return box
 
@@ -534,6 +558,11 @@ def _update_state_summary(widget):
         widget.dry_prepare_mda_btn.setEnabled(
             bool(dry.get("mapping_valid") and accepted)
         )
+    try:
+        from .workflow_docks import refresh_control_hub
+        refresh_control_hub(widget)
+    except Exception:
+        pass
 
 
 def _invalidate_handoff(widget):

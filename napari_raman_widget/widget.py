@@ -277,6 +277,12 @@ class HardwareWidget(QWidget):
 
         outer.addWidget(self.manual_link)
 
+        # Compact biological workflow launcher. This only opens/closes Napari
+        # docks; all microscope hardware actions remain in the existing panels.
+        from .workflow_docks import build_control_hub
+        self.lipiddrop_control_box = build_control_hub(self)
+        outer.addWidget(self.lipiddrop_control_box)
+
         # ================= LOADING SECTION =================
         loading_box = make_collapsible("Loading", expanded=True)
         loading_layout = QVBoxLayout()
@@ -1296,16 +1302,15 @@ class HardwareWidget(QWidget):
         self.apply_mda_positions_btn.clicked.connect(lambda: apply_prepared_positions(self))
         sel_layout.addWidget(self.apply_mda_positions_btn)
 
-        # Koseki validation path: fixed cells, native MDA Z-stack, per-LD
-        # best-focus selection, physical size limits, CellMask assignment and
-        # objective-calibrated stage targeting. The live loop remains below.
+        # Biological workflows live in independent Napari docks. Their logic and
+        # button callbacks are unchanged; only their presentation is separated.
         from .fixed_cell import build_fixed_cell_controls
         self.fixed_cell_box = build_fixed_cell_controls(self)
-        outer.addWidget(self.fixed_cell_box)
-
         from .dry_run import build_dry_run_controls
         self.dry_run_box = build_dry_run_controls(self)
-        outer.addWidget(self.dry_run_box)
+        from .workflow_docks import install_workflow_docks
+        install_workflow_docks(self, self.fixed_cell_box, self.dry_run_box)
+
         from .dish_panel import build_dish_controls
         self.dish_box = build_dish_controls(self)
         outer.addWidget(self.dish_box)
@@ -2645,8 +2650,12 @@ class HardwareWidget(QWidget):
             self.connect_btn.setEnabled(False)
             self.disconnect_btn.setEnabled(True)
             self.reload_tf_btn.setEnabled(True)
+            from .workflow_docks import refresh_control_hub
+            refresh_control_hub(self)
         except Exception as e:
             self.status.setText(f"Status: failed -- {e}")
+            from .workflow_docks import refresh_control_hub
+            refresh_control_hub(self)
 
     def reload_transformer(self):
         tf = self.tf_path.text().strip()
@@ -2659,8 +2668,12 @@ class HardwareWidget(QWidget):
             self._reset_galvo_voltage_inputs()
             vdm_msg = self._load_vandermonde()
             self.status.setText(f"Status: transformer reloaded OK{vdm_msg}")
+            from .workflow_docks import refresh_control_hub
+            refresh_control_hub(self)
         except Exception as e:
             self.status.setText(f"Status: transformer reload failed -- {e}")
+            from .workflow_docks import refresh_control_hub
+            refresh_control_hub(self)
 
     def disconnect(self):
         if self._acquisition_controller is not None and self.core.mda.is_running():
@@ -2748,6 +2761,8 @@ class HardwareWidget(QWidget):
         self.connect_btn.setEnabled(True)
         self.disconnect_btn.setEnabled(False)
         self.reload_tf_btn.setEnabled(False)
+        from .workflow_docks import refresh_control_hub
+        refresh_control_hub(self)
 
     def _disconnect_on_shutdown(self):
         if self.core is not None or self.collector is not None:

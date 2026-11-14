@@ -267,9 +267,52 @@ def assign_targets_to_cells(targets, cell_labels, *, require_cell=True, max_per_
     return targets
 
 
+def _update_fixed_ui_state(owner):
+    """Progressively enable the fixed-cell workflow without touching hardware."""
+    fixed = getattr(owner, "_fixed", {}) or {}
+    has_stack = fixed.get("stack") is not None
+    has_cellmask = fixed.get("cellmask_image") is not None
+    has_targets = bool(_selected_targets(owner)) if fixed.get("targets") else False
+    has_positions = bool(fixed.get("stage_positions"))
+
+    for name, enabled in (
+        ("fixed_focus_btn", has_stack),
+        ("fixed_segment_btn", has_stack),
+        ("fixed_segment_cells_btn", has_cellmask),
+        ("fixed_validate_btn", has_targets),
+        ("fixed_prepare_btn", has_positions),
+    ):
+        control = getattr(owner, name, None)
+        if control is not None:
+            control.setEnabled(enabled)
+
+    readiness = getattr(owner, "fixed_readiness", None)
+    if readiness is not None:
+        cell_count = (
+            len({row.get("cell_id", 0) for row in _selected_targets(owner)
+                 if row.get("cell_id", 0) > 0})
+            if has_targets else 0
+        )
+        readiness.setText(
+            f"{'✓' if has_stack else '○'} Stack loaded   "
+            f"{'✓' if has_targets else '○'} Focused LDs: "
+            f"{len(_selected_targets(owner)) if has_targets else 0}\n"
+            f"{'✓' if cell_count else '○'} Cells assigned: {cell_count}   "
+            f"{'✓' if has_positions else '○'} Stage targets validated\n"
+            f"{'✓' if fixed.get('mda_prepared') else '○'} MDA prepared"
+        )
+
+    try:
+        from .workflow_docks import refresh_control_hub
+        refresh_control_hub(owner)
+    except Exception:
+        pass
+
+
 def _say(owner, message):
     owner.fixed_status.setText(message)
     owner.status.setText(f"Status: {message}")
+    _update_fixed_ui_state(owner)
 
 
 def _remove(owner, name):
@@ -717,6 +760,7 @@ def _refresh_targets(owner):
         f"Selected {len(targets)} focused LD(s) across {len(assigned)} "
         f"CellMask cell(s); {mode}."
     )
+    _update_fixed_ui_state(owner)
 
 
 def _reject_selected(owner):
@@ -841,57 +885,89 @@ def _prepare_mda(owner):
 
 
 def build_fixed_cell_controls(owner):
-    """Build fixed-cell validation mode without removing live tracking."""
+    """Build the four-step fixed-cell validation workflow."""
     from .widget import _cellpose_model_names
 
-    box = make_collapsible(
-        "Fixed-cell Z-stack Raman targeting (validation mode)", expanded=True
-    )
+    box = make_collapsible("Fixed-cell Z-stack Targeting", expanded=True)
     layout = QVBoxLayout(box)
 
     intro = QLabel(
-        "Default pilot: shared MDA → BODIPY + CellMask Orange Z-stack → "
-        "one best-focus plane per LD → assign LDs per cell → "
-        "objective-specific pixel→stage validation → Raman MDA. "
-        "The live lipolysis loop remains below."
+        "Fixed-cell validation first: acquire through Jeff's shared MDA, "
+        "segment focused LDs, review them per cell, then prepare stage targets."
     )
     intro.setWordWrap(True)
     intro.setToolTip(
-        "This panel adds biological target selection. It does not replace "
-        "Jeff's Time, Positions, stage/camera Grid, Z Stack, Channels, "
-        "Raman selection, Autofocus or Run controls."
+        "This workflow adds biological target selection only. It does not "
+        "replace Jeff's Time, Positions, Grid, Z Stack, Channels, Raman "
+        "selection, Autofocus, Save, Run or Cancel controls."
     )
     layout.addWidget(intro)
 
-    acquisition = QGroupBox("A — Shared MDA acquisition")
-    acquisition_layout = QVBoxLayout(acquisition)
+    mode_row = QHBoxLayout()
+    mode_row.addWidget(QLabel("Interface:"))
+    owner.fixed_interface_mode = QComboBox()
+    owner.fixed_interface_mode.addItems(["Basic", "Expert"])
+    owner.fixed_interface_mode.setToolTip(
+        "Basic shows the decisions needed for routine use. Expert reveals "
+        "Cellpose thresholds, anisotropy, focus-confidence and Z-span filters."
+    )
+    mode_row.addWidget(owner.fixed_interface_mode)
+    layout.addLayout(mode_row)
+
+    owner.fixed_readiness = QLabel()
+    owner.fixed_readiness.setWordWrap(True)
+    owner.fixed_readiness.setStyleSheet(
+        "QLabel { border: 1px solid palette(mid); padding: 6px; "
+        "font-family: monospace; }"
+    )
+    owner.fixed_readiness.setToolTip(
+        "Read-only readiness summary. Checkmarks indicate completed software "
+        "steps; no hardware is queried or moved."
+    )
+    layout.addWidget(owner.fixed_readiness)
+
+    # ---------------- 1. ACQUIRE ----------------
+    acquire = QGroupBox("1 — Acquire")
+    acquire_layout = QVBoxLayout(acquire)
+    acquire_note = QLabel(
+        "Configure BODIPY, CellMask Orange, Z Stack, Positions or field Grid "
+        "in the unchanged shared MDA, then acquire the fixed-cell data."
+    )
+    acquire_note.setWordWrap(True)
+    acquire_layout.addWidget(acquire_note)
+
     owner.fixed_open_mda_btn = QPushButton("Open shared MDA setup")
     owner.fixed_open_mda_btn.setToolTip(
-        "Open Jeff's authoritative MDA window. Configure Time, Positions, "
-        "stage/camera Grid, Z Stack, Channels, Raman selection and Autofocus "
-        "there. This button does not move hardware."
+        "Open Jeff's authoritative MDA window. This button only reveals the "
+        "existing dock and does not move hardware."
     )
     owner.fixed_open_mda_btn.clicked.connect(
         lambda _checked=False: _show_shared_mda(owner)
     )
-    acquisition_layout.addWidget(owner.fixed_open_mda_btn)
-    owner.fixed_refresh_mda_btn = QPushButton("Refresh MDA plan summary")
+    acquire_layout.addWidget(owner.fixed_open_mda_btn)
+
+    owner.fixed_refresh_mda_btn = QPushButton("Refresh acquisition summary")
     owner.fixed_refresh_mda_btn.setToolTip(
-        "Read configured MDA channels, Z plan, positions, field grid and time. "
-        "No acquisition or stage movement occurs."
+        "Read the configured channels, Z plan, positions, field grid and time "
+        "plan. No acquisition or stage movement occurs."
     )
     owner.fixed_refresh_mda_btn.clicked.connect(
         lambda _checked=False: _refresh_mda_summary(owner)
     )
-    acquisition_layout.addWidget(owner.fixed_refresh_mda_btn)
+    acquire_layout.addWidget(owner.fixed_refresh_mda_btn)
+
     owner.fixed_mda_summary = QLabel(
         "MDA not connected. Connect hardware to configure acquisition."
     )
     owner.fixed_mda_summary.setWordWrap(True)
-    acquisition_layout.addWidget(owner.fixed_mda_summary)
-    layout.addWidget(acquisition)
+    acquire_layout.addWidget(owner.fixed_mda_summary)
+    layout.addWidget(acquire)
 
-    scale_group = QGroupBox("B — Objective calibration and physical LD limits")
+    # ---------------- 2. SEGMENT ----------------
+    segment_step = QGroupBox("2 — Segment")
+    segment_layout = QVBoxLayout(segment_step)
+
+    scale_group = QGroupBox("Objective calibration and physical LD size")
     scale_form = QFormLayout(scale_group)
     owner.fixed_auto_scale_check = QCheckBox(
         "Use active objective's pixel-to-stage calibration"
@@ -902,6 +978,7 @@ def build_fixed_cell_controls(owner):
         "Vandermonde model, then calculate X/Y µm per pixel. The turret is not moved."
     )
     scale_form.addRow(owner.fixed_auto_scale_check)
+
     owner.fixed_pixel_input = QDoubleSpinBox()
     owner.fixed_pixel_input.setRange(0.001, 20.0)
     owner.fixed_pixel_input.setDecimals(5)
@@ -911,6 +988,7 @@ def build_fixed_cell_controls(owner):
         "Manual fallback only. Koseki's current 40× estimate is 0.325 µm/px."
     )
     scale_form.addRow("Fallback pixel size", owner.fixed_pixel_input)
+
     owner.fixed_scale_btn = QPushButton("Read active objective calibration")
     owner.fixed_scale_btn.setToolTip(
         "Read the active objective index and calculate X/Y µm-per-pixel. "
@@ -920,9 +998,11 @@ def build_fixed_cell_controls(owner):
         lambda _checked=False: _objective_scale(owner)
     )
     scale_form.addRow(owner.fixed_scale_btn)
+
     owner.fixed_scale_status = QLabel("Objective scale not read yet.")
     owner.fixed_scale_status.setWordWrap(True)
     scale_form.addRow(owner.fixed_scale_status)
+
     owner.fixed_min_diam_input = QDoubleSpinBox()
     owner.fixed_min_diam_input.setRange(0.1, 100.0)
     owner.fixed_min_diam_input.setValue(1.0)
@@ -932,6 +1012,7 @@ def build_fixed_cell_controls(owner):
         "At 0.325 µm/px, 1 µm is ≈3.08 px diameter and ≈7.4 px²."
     )
     scale_form.addRow("Minimum LD diameter", owner.fixed_min_diam_input)
+
     owner.fixed_max_diam_input = QDoubleSpinBox()
     owner.fixed_max_diam_input.setRange(0.2, 100.0)
     owner.fixed_max_diam_input.setValue(10.0)
@@ -940,6 +1021,7 @@ def build_fixed_cell_controls(owner):
         "Editable conservative upper limit. It replaces the old 3000-pixel maximum."
     )
     scale_form.addRow("Maximum LD diameter", owner.fixed_max_diam_input)
+
     owner.fixed_physical_summary = QLabel()
     owner.fixed_physical_summary.setWordWrap(True)
     scale_form.addRow(owner.fixed_physical_summary)
@@ -951,9 +1033,9 @@ def build_fixed_cell_controls(owner):
         control.valueChanged.connect(
             lambda _value=0: _update_physical_summary(owner)
         )
-    layout.addWidget(scale_group)
+    segment_layout.addWidget(scale_group)
 
-    ld_group = QGroupBox("C — BODIPY Z-stack, Cellpose and per-LD focus")
+    ld_group = QGroupBox("BODIPY Z-stack and focused LD segmentation")
     ld_layout = QVBoxLayout(ld_group)
     owner.fixed_use_bodipy_btn = QPushButton(
         "Use selected acquired layer as BODIPY Z-stack"
@@ -966,20 +1048,22 @@ def build_fixed_cell_controls(owner):
         lambda _checked=False: _use_bodipy(owner)
     )
     ld_layout.addWidget(owner.fixed_use_bodipy_btn)
-    owner.fixed_focus_btn = QPushButton("Score Z focus and show global preview")
+
+    owner.fixed_focus_btn = QPushButton("Preview Z focus")
     owner.fixed_focus_btn.setToolTip(
-        "Compute a Tenengrad focus score for each plane. Final targeting selects "
-        "the best plane independently for every stitched LD."
+        "Compute a global Tenengrad focus preview. Final targeting still "
+        "chooses the best plane independently for every stitched LD."
     )
     owner.fixed_focus_btn.clicked.connect(
         lambda _checked=False: _score_global_focus(owner)
     )
     ld_layout.addWidget(owner.fixed_focus_btn)
+
     owner.fixed_focus_status = QLabel("No BODIPY Z-stack loaded.")
     owner.fixed_focus_status.setWordWrap(True)
     ld_layout.addWidget(owner.fixed_focus_status)
 
-    form = QFormLayout()
+    basic_form = QFormLayout()
     owner.fixed_z_mode = QComboBox()
     owner.fixed_z_mode.addItem("Cellpose 2D + stitch across Z", "stitch")
     owner.fixed_z_mode.addItem("Cellpose 2.5D / 3D flow", "3d")
@@ -987,11 +1071,13 @@ def build_fixed_cell_controls(owner):
         "2D+stitch segments each XY plane and joins overlapping masks across Z. "
         "2.5D runs Cellpose do_3D=True with axial anisotropy."
     )
-    form.addRow("Z segmentation mode", owner.fixed_z_mode)
+    basic_form.addRow("Z segmentation mode", owner.fixed_z_mode)
+
     owner.fixed_ld_model_combo = QComboBox()
     for name in _cellpose_model_names():
         owner.fixed_ld_model_combo.addItem(name, name)
-    form.addRow("LD Cellpose model", owner.fixed_ld_model_combo)
+    basic_form.addRow("LD Cellpose model", owner.fixed_ld_model_combo)
+
     owner.fixed_ld_browse = QPushButton("Choose LD model weights…")
     owner.fixed_ld_browse.setToolTip(
         "Choose lipid-droplet-specific weights trained with this Cellpose version."
@@ -1001,7 +1087,13 @@ def build_fixed_cell_controls(owner):
             owner.fixed_ld_model_combo
         )
     )
-    form.addRow(owner.fixed_ld_browse)
+    basic_form.addRow(owner.fixed_ld_browse)
+    ld_layout.addLayout(basic_form)
+
+    owner.fixed_advanced_box = make_collapsible(
+        "Advanced segmentation parameters", expanded=False
+    )
+    advanced_form = QFormLayout(owner.fixed_advanced_box)
 
     owner.fixed_cellprob_input = QDoubleSpinBox()
     owner.fixed_cellprob_input.setRange(-10.0, 10.0)
@@ -1010,13 +1102,15 @@ def build_fixed_cell_controls(owner):
     owner.fixed_cellprob_input.setToolTip(
         "Higher is more conservative. Start at +1.0 and validate manually."
     )
-    form.addRow("Cell-probability threshold", owner.fixed_cellprob_input)
+    advanced_form.addRow("Cell-probability threshold", owner.fixed_cellprob_input)
+
     owner.fixed_flow_input = QDoubleSpinBox()
     owner.fixed_flow_input.setRange(0.0, 3.0)
     owner.fixed_flow_input.setSingleStep(0.05)
     owner.fixed_flow_input.setValue(0.4)
     owner.fixed_flow_input.setToolTip("Cellpose flow threshold; lower is stricter.")
-    form.addRow("Flow threshold", owner.fixed_flow_input)
+    advanced_form.addRow("Flow threshold", owner.fixed_flow_input)
+
     owner.fixed_stitch_input = QDoubleSpinBox()
     owner.fixed_stitch_input.setRange(0.0, 1.0)
     owner.fixed_stitch_input.setSingleStep(0.05)
@@ -1025,7 +1119,8 @@ def build_fixed_cell_controls(owner):
         "Adjacent-plane overlap threshold for 2D+stitch. Higher requires "
         "stronger Z continuity."
     )
-    form.addRow("Z stitch threshold", owner.fixed_stitch_input)
+    advanced_form.addRow("Z stitch threshold", owner.fixed_stitch_input)
+
     owner.fixed_z_step_input = QDoubleSpinBox()
     owner.fixed_z_step_input.setRange(0.01, 20.0)
     owner.fixed_z_step_input.setDecimals(3)
@@ -1034,7 +1129,8 @@ def build_fixed_cell_controls(owner):
     owner.fixed_z_step_input.setToolTip(
         "Fallback only; the source MDA Z step is used automatically when present."
     )
-    form.addRow("Fallback Z step", owner.fixed_z_step_input)
+    advanced_form.addRow("Fallback Z step", owner.fixed_z_step_input)
+
     owner.fixed_anisotropy_input = QDoubleSpinBox()
     owner.fixed_anisotropy_input.setRange(0.0, 100.0)
     owner.fixed_anisotropy_input.setDecimals(3)
@@ -1043,9 +1139,10 @@ def build_fixed_cell_controls(owner):
     owner.fixed_anisotropy_input.setToolTip(
         "Leave 0 to calculate Cellpose anisotropy as Z-step / XY pixel size."
     )
-    form.addRow("2.5D anisotropy override", owner.fixed_anisotropy_input)
+    advanced_form.addRow("2.5D anisotropy override", owner.fixed_anisotropy_input)
+
     owner.fixed_z_status = QLabel("Z step not read yet.")
-    form.addRow(owner.fixed_z_status)
+    advanced_form.addRow(owner.fixed_z_status)
 
     owner.fixed_focus_conf_input = QDoubleSpinBox()
     owner.fixed_focus_conf_input.setRange(0.0, 1.0)
@@ -1054,14 +1151,16 @@ def build_fixed_cell_controls(owner):
     owner.fixed_focus_conf_input.setToolTip(
         "Minimum separation between best and second-best local focus scores."
     )
-    form.addRow("Minimum focus confidence", owner.fixed_focus_conf_input)
+    advanced_form.addRow("Minimum focus confidence", owner.fixed_focus_conf_input)
+
     owner.fixed_min_z_span_input = QSpinBox()
     owner.fixed_min_z_span_input.setRange(1, 1000)
     owner.fixed_min_z_span_input.setValue(1)
     owner.fixed_min_z_span_input.setToolTip(
         "Minimum number of Z planes occupied by the stitched/3D LD label."
     )
-    form.addRow("Minimum LD Z span", owner.fixed_min_z_span_input)
+    advanced_form.addRow("Minimum LD Z span", owner.fixed_min_z_span_input)
+
     owner.fixed_max_z_span_input = QSpinBox()
     owner.fixed_max_z_span_input.setRange(0, 1000)
     owner.fixed_max_z_span_input.setValue(0)
@@ -1069,7 +1168,8 @@ def build_fixed_cell_controls(owner):
     owner.fixed_max_z_span_input.setToolTip(
         "Optional maximum Z span to reject broad haze or merged clusters."
     )
-    form.addRow("Maximum LD Z span", owner.fixed_max_z_span_input)
+    advanced_form.addRow("Maximum LD Z span", owner.fixed_max_z_span_input)
+
     owner.fixed_reject_edge_check = QCheckBox(
         "Reject LDs focused at first/last Z plane"
     )
@@ -1077,7 +1177,8 @@ def build_fixed_cell_controls(owner):
     owner.fixed_reject_edge_check.setToolTip(
         "An edge maximum suggests the Z-stack did not bracket true focus."
     )
-    form.addRow(owner.fixed_reject_edge_check)
+    advanced_form.addRow(owner.fixed_reject_edge_check)
+
     owner.fixed_grid_spacing_input = QDoubleSpinBox()
     owner.fixed_grid_spacing_input.setRange(0.1, 20.0)
     owner.fixed_grid_spacing_input.setValue(1.0)
@@ -1085,7 +1186,8 @@ def build_fixed_cell_controls(owner):
     owner.fixed_grid_spacing_input.setToolTip(
         "Optional Raman spacing inside one LD; separate from the field grid."
     )
-    form.addRow("Intra-LD grid spacing", owner.fixed_grid_spacing_input)
+    advanced_form.addRow("Intra-LD grid spacing", owner.fixed_grid_spacing_input)
+
     owner.fixed_grid_margin_input = QDoubleSpinBox()
     owner.fixed_grid_margin_input.setRange(0.0, 20.0)
     owner.fixed_grid_margin_input.setValue(0.5)
@@ -1093,11 +1195,11 @@ def build_fixed_cell_controls(owner):
     owner.fixed_grid_margin_input.setToolTip(
         "Keep Raman grid points this far inside the focused LD boundary."
     )
-    form.addRow("Intra-LD edge margin", owner.fixed_grid_margin_input)
-    ld_layout.addLayout(form)
-    owner.fixed_segment_btn = QPushButton(
-        "Segment Z-stack and keep one focused target per LD"
-    )
+    advanced_form.addRow("Intra-LD edge margin", owner.fixed_grid_margin_input)
+    ld_layout.addWidget(owner.fixed_advanced_box)
+
+    owner.fixed_segment_btn = QPushButton("Run focused LD segmentation")
+    owner.fixed_segment_btn.setMinimumHeight(34)
     owner.fixed_segment_btn.setToolTip(
         "Run Cellpose 2D+stitch or 2.5D, apply physical diameter and Z-span "
         "filters, choose each LD's best-focus plane, and place a safe center. "
@@ -1107,9 +1209,14 @@ def build_fixed_cell_controls(owner):
         lambda _checked=False: _segment_droplets(owner)
     )
     ld_layout.addWidget(owner.fixed_segment_btn)
-    layout.addWidget(ld_group)
+    segment_layout.addWidget(ld_group)
+    layout.addWidget(segment_step)
 
-    cell_group = QGroupBox("D — CellMask Orange and LDs per cell")
+    # ---------------- 3. REVIEW ----------------
+    review_step = QGroupBox("3 — Review")
+    review_step_layout = QVBoxLayout(review_step)
+
+    cell_group = QGroupBox("CellMask Orange and LDs per cell")
     cell_layout = QVBoxLayout(cell_group)
     owner.fixed_use_cellmask_btn = QPushButton(
         "Use selected acquired layer as CellMask Orange"
@@ -1122,11 +1229,13 @@ def build_fixed_cell_controls(owner):
         lambda _checked=False: _use_cellmask(owner)
     )
     cell_layout.addWidget(owner.fixed_use_cellmask_btn)
+
     cell_form = QFormLayout()
     owner.fixed_cell_model_combo = QComboBox()
     for name in _cellpose_model_names():
         owner.fixed_cell_model_combo.addItem(name, name)
     cell_form.addRow("Whole-cell Cellpose model", owner.fixed_cell_model_combo)
+
     owner.fixed_cell_browse = QPushButton("Choose whole-cell model weights…")
     owner.fixed_cell_browse.clicked.connect(
         lambda _checked=False: owner.browse_cellpose_model(
@@ -1134,6 +1243,7 @@ def build_fixed_cell_controls(owner):
         )
     )
     cell_form.addRow(owner.fixed_cell_browse)
+
     owner.fixed_cell_diam_input = QDoubleSpinBox()
     owner.fixed_cell_diam_input.setRange(1.0, 500.0)
     owner.fixed_cell_diam_input.setValue(35.0)
@@ -1143,14 +1253,17 @@ def build_fixed_cell_controls(owner):
         "objective calibration."
     )
     cell_form.addRow("Expected cell diameter", owner.fixed_cell_diam_input)
+
     owner.fixed_cell_prob_input = QDoubleSpinBox()
     owner.fixed_cell_prob_input.setRange(-10.0, 10.0)
     owner.fixed_cell_prob_input.setValue(0.5)
     cell_form.addRow("Whole-cell probability threshold", owner.fixed_cell_prob_input)
+
     owner.fixed_cell_flow_input = QDoubleSpinBox()
     owner.fixed_cell_flow_input.setRange(0.0, 3.0)
     owner.fixed_cell_flow_input.setValue(0.4)
     cell_form.addRow("Whole-cell flow threshold", owner.fixed_cell_flow_input)
+
     owner.fixed_require_cell_check = QCheckBox(
         "Require every LD target to belong to a CellMask cell"
     )
@@ -1159,6 +1272,7 @@ def build_fixed_cell_controls(owner):
         lambda _checked=False: _assign_cells(owner)
     )
     cell_form.addRow(owner.fixed_require_cell_check)
+
     owner.fixed_max_per_cell_input = QSpinBox()
     owner.fixed_max_per_cell_input.setRange(0, 1000)
     owner.fixed_max_per_cell_input.setSpecialValueText("All valid LDs")
@@ -1172,8 +1286,9 @@ def build_fixed_cell_controls(owner):
     )
     cell_form.addRow("Maximum LDs per cell", owner.fixed_max_per_cell_input)
     cell_layout.addLayout(cell_form)
+
     owner.fixed_segment_cells_btn = QPushButton(
-        "Segment CellMask cells and assign focused LDs"
+        "Segment cells and assign focused LDs"
     )
     owner.fixed_segment_cells_btn.setToolTip(
         "Segment CellMask Orange, assign each LD center a parent cell_id, and "
@@ -1183,10 +1298,10 @@ def build_fixed_cell_controls(owner):
         lambda _checked=False: _segment_cells(owner)
     )
     cell_layout.addWidget(owner.fixed_segment_cells_btn)
-    layout.addWidget(cell_group)
+    review_step_layout.addWidget(cell_group)
 
-    review = QGroupBox("E — Review focused LD targets")
-    review_layout = QVBoxLayout(review)
+    targets_group = QGroupBox("Focused LD targets")
+    targets_layout = QVBoxLayout(targets_group)
     owner.fixed_intra_grid_check = QCheckBox(
         "Use intra-LD Raman grid instead of one centered point"
     )
@@ -1199,25 +1314,28 @@ def build_fixed_cell_controls(owner):
     owner.fixed_intra_grid_check.toggled.connect(
         lambda _checked=False: _refresh_targets(owner)
     )
-    review_layout.addWidget(owner.fixed_intra_grid_check)
+    targets_layout.addWidget(owner.fixed_intra_grid_check)
+
     owner.fixed_target_summary = QLabel("No focused LD targets yet.")
     owner.fixed_target_summary.setWordWrap(True)
-    review_layout.addWidget(owner.fixed_target_summary)
+    targets_layout.addWidget(owner.fixed_target_summary)
+
     owner.fixed_target_table = QTableWidget(0, 7)
     owner.fixed_target_table.setHorizontalHeaderLabels(
         ["LD", "Cell", "Best Z", "Diameter µm", "Focus conf.", "Z span", "Selected"]
     )
     owner.fixed_target_table.setMaximumHeight(220)
-    review_layout.addWidget(owner.fixed_target_table)
+    targets_layout.addWidget(owner.fixed_target_table)
+
     review_buttons = QHBoxLayout()
-    owner.fixed_reject_btn = QPushButton("Reject selected LD center(s)")
+    owner.fixed_reject_btn = QPushButton("Reject selected target(s)")
     owner.fixed_reject_btn.setToolTip(
         "Select red LD-center points in Napari, then reject them from targeting."
     )
     owner.fixed_reject_btn.clicked.connect(
         lambda _checked=False: _reject_selected(owner)
     )
-    owner.fixed_reset_btn = QPushButton("Reset fixed-cell rejections")
+    owner.fixed_reset_btn = QPushButton("Reset rejections")
     owner.fixed_reset_btn.clicked.connect(
         lambda _checked=False: (
             owner._fixed.update(rejected=set()), _refresh_targets(owner)
@@ -1225,21 +1343,24 @@ def build_fixed_cell_controls(owner):
     )
     review_buttons.addWidget(owner.fixed_reject_btn)
     review_buttons.addWidget(owner.fixed_reset_btn)
-    review_layout.addLayout(review_buttons)
-    layout.addWidget(review)
+    targets_layout.addLayout(review_buttons)
+    review_step_layout.addWidget(targets_group)
+    layout.addWidget(review_step)
 
-    handoff = QGroupBox("F — Pixel→stage validation and Raman MDA handoff")
-    handoff_layout = QVBoxLayout(handoff)
+    # ---------------- 4. TARGET ----------------
+    target_step = QGroupBox("4 — Target")
+    target_layout = QVBoxLayout(target_step)
     note = QLabel(
-        "Validation computes explicit stage XYZ targets from the source MDA "
-        "plane and active-objective calibration. It does not move hardware. "
-        "Only the shared MDA Run action executes the experiment."
+        "Validation performs calculations only. No stage, galvo, shutter or "
+        "laser movement. Hardware execution remains exclusively in shared MDA Run."
     )
     note.setWordWrap(True)
-    handoff_layout.addWidget(note)
+    target_layout.addWidget(note)
+
     owner.fixed_validate_btn = QPushButton(
-        "Validate pixel → stage LD targets (no motion)"
+        "Validate pixel → stage targets (no motion)"
     )
+    owner.fixed_validate_btn.setMinimumHeight(34)
     owner.fixed_validate_btn.setToolTip(
         "Calculate objective-calibrated stage positions and verify finite XYZ "
         "and source-image provenance. No stage, galvo, shutter or laser command."
@@ -1247,26 +1368,28 @@ def build_fixed_cell_controls(owner):
     owner.fixed_validate_btn.clicked.connect(
         lambda _checked=False: _validate_stage(owner)
     )
-    handoff_layout.addWidget(owner.fixed_validate_btn)
+    target_layout.addWidget(owner.fixed_validate_btn)
+
     owner.fixed_stage_status = QLabel("Stage targets not validated.")
     owner.fixed_stage_status.setWordWrap(True)
-    handoff_layout.addWidget(owner.fixed_stage_status)
-    owner.fixed_prepare_btn = QPushButton(
-        "Prepare focused LD positions in Jeff's Raman MDA"
-    )
+    target_layout.addWidget(owner.fixed_stage_status)
+
+    owner.fixed_prepare_btn = QPushButton("Send targets to shared Raman MDA")
+    owner.fixed_prepare_btn.setMinimumHeight(34)
     owner.fixed_prepare_btn.setToolTip(
-        "Attach validated LD stage positions to the shared MDA. This does not "
-        "press Run or move hardware."
+        "Attach validated LD stage positions to the unchanged shared MDA. "
+        "This does not press Run or move hardware."
     )
     owner.fixed_prepare_btn.clicked.connect(
         lambda _checked=False: _prepare_mda(owner)
     )
-    handoff_layout.addWidget(owner.fixed_prepare_btn)
-    layout.addWidget(handoff)
+    target_layout.addWidget(owner.fixed_prepare_btn)
+    layout.addWidget(target_step)
 
     owner.fixed_status = QLabel("Fixed-cell validation mode ready.")
     owner.fixed_status.setWordWrap(True)
     layout.addWidget(owner.fixed_status)
+
     owner._fixed = dict(
         stack=None,
         source_layer=None,
@@ -1280,5 +1403,12 @@ def build_fixed_cell_controls(owner):
         stage_positions=[],
         mda_prepared=False,
     )
+
+    def _set_interface_mode(text):
+        owner.fixed_advanced_box.setVisible(text == "Expert")
+
+    owner.fixed_interface_mode.currentTextChanged.connect(_set_interface_mode)
+    _set_interface_mode(owner.fixed_interface_mode.currentText())
     _update_physical_summary(owner)
+    _update_fixed_ui_state(owner)
     return box

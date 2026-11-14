@@ -92,7 +92,7 @@ if __name__ == "__main__":
     qt_window.setWindowIcon(icon)
 
     widget = HardwareWidget(viewer)
-    viewer.window.add_dock_widget(widget, name="Raman", area="right")
+    viewer.window.add_dock_widget(widget, name="LipidDrop Control", area="right")
 
     # Napari/Qt may update the native window during startup, so apply the native
     # taskbar icon once now and once again after the event loop begins.
