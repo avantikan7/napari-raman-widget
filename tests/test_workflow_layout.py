@@ -1,7 +1,14 @@
 from types import SimpleNamespace
 
 import pytest
-from qtpy.QtWidgets import QApplication, QGroupBox, QPushButton, QTabBar
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import (
+    QApplication,
+    QDockWidget,
+    QGroupBox,
+    QMainWindow,
+    QPushButton,
+)
 
 
 @pytest.fixture(scope="session")
@@ -9,20 +16,27 @@ def qt_app():
     return QApplication.instance() or QApplication([])
 
 
-def test_lipid_workflows_are_separate_docks_and_hardware_controls_remain(qt_app):
-    """The UI refactor must not delete or replace Jeff's hardware controls."""
+def test_lipid_workflows_are_real_dock_tabs_and_hardware_controls_remain(qt_app):
+    """Workflow tabs must not replace or modify Jeff's hardware controls."""
     from napari_raman_widget.widget import HardwareWidget
+    from napari_raman_widget.workflow_docks import (
+        tabify_shared_mda,
+        tabify_workflow_docks,
+    )
 
     viewer = SimpleNamespace(window=SimpleNamespace())
     widget = HardwareWidget(viewer)
-    try:
-        assert widget.lipiddrop_control_box.title() == "LipidDrop Control"
-        assert widget._fixed_workflow_dock.windowTitle() == "Fixed-cell Targeting"
-        assert widget._live_workflow_dock.windowTitle() == "Live Lipolysis Tracker"
-        assert widget._fixed_workflow_dock.isHidden()
-        assert widget._live_workflow_dock.isHidden()
+    main = QMainWindow()
+    raman = QDockWidget("Raman")
+    raman.setWidget(QGroupBox("hardware placeholder"))
+    main.addDockWidget(Qt.RightDockWidgetArea, raman)
 
-        # Existing hardware actions are still the same controls on HardwareWidget.
+    try:
+        assert widget.lipiddrop_control_box.title() == "LipidDrop status"
+        assert widget._fixed_workflow_dock.windowTitle() == "Fixed-cell"
+        assert widget._live_workflow_dock.windowTitle() == "Live lipolysis"
+
+        # Existing hardware actions are still the original HardwareWidget controls.
         for name in (
             "connect_btn",
             "disconnect_btn",
@@ -50,20 +64,30 @@ def test_lipid_workflows_are_separate_docks_and_hardware_controls_remain(qt_app)
             "4 — Revisit",
         } <= live_titles
 
-        assert isinstance(widget.workflow_tabs, QTabBar)
-        assert [
-            widget.workflow_tabs.tabText(i)
-            for i in range(widget.workflow_tabs.count())
-        ] == ["Fixed-cell", "Live lipolysis", "Raman MDA"]
+        assert tabify_workflow_docks(widget, raman, main)
+        tabified = set(main.tabifiedDockWidgets(raman))
+        assert widget._fixed_workflow_dock in tabified
+        assert widget._live_workflow_dock in tabified
+        assert not widget._fixed_workflow_dock.isFloating()
+        assert not widget._live_workflow_dock.isFloating()
 
-        widget.workflow_tabs.tabBarClicked.emit(0)
-        assert not widget._fixed_workflow_dock.isHidden()
-        assert widget._live_workflow_dock.isHidden()
+        for dock in (widget._fixed_workflow_dock, widget._live_workflow_dock):
+            assert not (dock.features() & QDockWidget.DockWidgetFloatable)
+            assert not (dock.features() & QDockWidget.DockWidgetMovable)
+            assert not dock.isHidden()
 
-        widget.workflow_tabs.tabBarClicked.emit(1)
-        assert not widget._live_workflow_dock.isHidden()
+        # Jeff's existing MDA dock is only tabified; its controls/features stay intact.
+        mda = QDockWidget("MDA")
+        mda.setWidget(QGroupBox("Jeff MDA placeholder"))
+        main.addDockWidget(Qt.RightDockWidgetArea, mda)
+        mda_features = mda.features()
+        widget.main_window = SimpleNamespace(_dock_widgets={"MDA": mda})
+        widget.viewer.window = SimpleNamespace(_qt_window=main)
+        assert tabify_shared_mda(widget)
+        assert mda in set(main.tabifiedDockWidgets(raman))
+        assert mda.features() == mda_features
+        assert not mda.isFloating()
     finally:
-        widget._fixed_workflow_dock.close()
-        widget._live_workflow_dock.close()
+        main.close()
         widget.close()
         qt_app.processEvents()

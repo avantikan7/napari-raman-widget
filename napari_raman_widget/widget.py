@@ -2616,6 +2616,8 @@ class HardwareWidget(QWidget):
             self._connect_mda_completion_events()
             from .unified_mda import install_unified_mda
             install_unified_mda(self)
+            from .workflow_docks import tabify_shared_mda
+            tabify_shared_mda(self)
 
             tf = self.tf_path.text().strip()
             if tf:
