@@ -69,9 +69,9 @@ def refresh_control_hub(owner) -> None:
         f"Objective: {objective_text}\n"
         f"{_status_mark(calibration)} Pixel→stage calibration: "
         f"{'valid' if calibration else 'not loaded'}\n"
-        f"{_status_mark(fixed_targets > 0)} Fixed-cell targets: {fixed_targets} | "
+        f"{_status_mark(fixed_targets > 0)} 3D LD targets: {fixed_targets} | "
         f"MDA prepared: {'yes' if fixed_prepared else 'no'}\n"
-        f"{_status_mark(live_baseline > 0)} Live T0 identities: "
+        f"{_status_mark(live_baseline > 0)} LD tracking T0 identities: "
         f"{live_baseline if live_baseline else 'not set'} | "
         f"MDA prepared: {'yes' if live_prepared else 'no'}"
     )
@@ -91,7 +91,7 @@ def tabify_workflow_docks(
     anchor_dock: QDockWidget | None = None,
     main_window: QMainWindow | None = None,
 ) -> bool:
-    """Place Raman, fixed-cell, and live workflows in one fixed tab group."""
+    """Place Raman, 3D LD Targeting, and LD Tracking in one fixed tab group."""
     fixed = getattr(owner, "_fixed_workflow_dock", None)
     live = getattr(owner, "_live_workflow_dock", None)
     if fixed is None or live is None:
@@ -178,14 +178,14 @@ def build_control_hub(owner) -> QGroupBox:
     layout = QVBoxLayout(box)
 
     note = QLabel(
-        "Use the dock tabs above: Raman | Fixed-cell | Live lipolysis | MDA. "
+        "Use the dock tabs above: Raman | 3D LD Targeting | LD Tracking | MDA. "
         "Workflows stay docked in one pane; no dragging is required."
     )
     note.setWordWrap(True)
     note.setToolTip(
-        "Fixed-cell and Live lipolysis are analysis workspaces. MDA remains "
-        "Jeff's unchanged acquisition workspace. Switching tabs never moves "
-        "the stage, galvo, objective, shutter, filter, or laser."
+        "3D LD Targeting and LD Tracking are biological-analysis workspaces. "
+        "MDA remains Jeff's unchanged acquisition workspace. Switching tabs "
+        "never moves the stage, galvo, objective, shutter, filter, or laser."
     )
     layout.addWidget(note)
 
@@ -226,23 +226,23 @@ def install_workflow_docks(owner, fixed_widget: QWidget, live_widget: QWidget) -
     if real_docks:
         owner._fixed_workflow_dock = add_dock(
             fixed_scroll,
-            name="Fixed-cell",
+            name="3D LD Targeting",
             area="right",
             allowed_areas=("right",),
             add_vertical_stretch=False,
         )
         owner._live_workflow_dock = add_dock(
             live_scroll,
-            name="Live lipolysis",
+            name="LD Tracking",
             area="right",
             allowed_areas=("right",),
             add_vertical_stretch=False,
         )
     else:
         # Hardware-free tests use ordinary QDockWidgets and tabify them later.
-        owner._fixed_workflow_dock = QDockWidget("Fixed-cell")
+        owner._fixed_workflow_dock = QDockWidget("3D LD Targeting")
         owner._fixed_workflow_dock.setWidget(fixed_scroll)
-        owner._live_workflow_dock = QDockWidget("Live lipolysis")
+        owner._live_workflow_dock = QDockWidget("LD Tracking")
         owner._live_workflow_dock.setWidget(live_scroll)
 
     for dock in (owner._fixed_workflow_dock, owner._live_workflow_dock):

@@ -885,15 +885,15 @@ def _prepare_mda(owner):
 
 
 def build_fixed_cell_controls(owner):
-    """Build the four-step fixed-cell validation workflow."""
+    """Build the four-step 3D LD targeting validation workflow."""
     from .widget import _cellpose_model_names
 
-    box = make_collapsible("Fixed-cell Z-stack Targeting", expanded=True)
+    box = make_collapsible("3D LD Targeting", expanded=True)
     layout = QVBoxLayout(box)
 
     intro = QLabel(
-        "Fixed-cell validation first: acquire through Jeff's shared MDA, "
-        "segment focused LDs, review them per cell, then prepare stage targets."
+        "Validation workflow for fixed adipocytes: acquire through Jeff's shared "
+        "MDA, segment focused LDs, review them per cell, then prepare stage targets."
     )
     intro.setWordWrap(True)
     intro.setToolTip(

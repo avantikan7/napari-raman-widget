@@ -82,14 +82,14 @@ def _watershed_masks(plane, background_sigma=12.0, min_distance=3, threshold_sca
 
 
 def build_dry_run_controls(widget):
-    """Create the four-step experimental live-lipolysis workflow."""
+    """Create the four-step experimental LD tracking workflow."""
     from qtpy.QtWidgets import QGroupBox
 
-    box = make_collapsible("Live Lipolysis Tracker (experimental)", expanded=True)
+    box = make_collapsible("LD Tracking", expanded=True)
     lay = QVBoxLayout(box)
 
     warning = QLabel(
-        "EXPERIMENTAL LIVE MODE — use after fixed-cell stage targeting has been validated."
+        "EXPERIMENTAL LIVE-LIPOLYSIS WORKFLOW — use after 3D LD stage targeting has been validated."
     )
     warning.setWordWrap(True)
     warning.setStyleSheet(

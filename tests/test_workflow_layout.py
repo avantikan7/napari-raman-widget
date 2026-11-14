@@ -33,8 +33,8 @@ def test_lipid_workflows_are_real_dock_tabs_and_hardware_controls_remain(qt_app)
 
     try:
         assert widget.lipiddrop_control_box.title() == "LipidDrop status"
-        assert widget._fixed_workflow_dock.windowTitle() == "Fixed-cell"
-        assert widget._live_workflow_dock.windowTitle() == "Live lipolysis"
+        assert widget._fixed_workflow_dock.windowTitle() == "3D LD Targeting"
+        assert widget._live_workflow_dock.windowTitle() == "LD Tracking"
 
         # Existing hardware actions are still the original HardwareWidget controls.
         for name in (

@@ -144,7 +144,7 @@ if __name__ == "__main__":
     from napari_raman_widget.workflow_docks import tabify_workflow_docks
 
     # Use real dock tabs, not floating workflow windows. The hardware widget is
-    # the anchor; Fixed-cell and Live lipolysis are tabified beside it.
+    # the anchor; 3D LD Targeting and LD Tracking are tabified beside it.
     tabify_workflow_docks(widget, raman_dock)
 
     # Napari/Qt may update the native window during startup, so apply the native
