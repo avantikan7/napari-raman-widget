@@ -19,6 +19,7 @@ for component in (
         sys.path.insert(0, path)
 
 APP_ID = "avantikan7.LipidDropImaging.Adipocyte"
+LAUNCHER_PATH = WORKSPACE / "LipidDropImaging.exe"
 
 if sys.platform == "win32":
     import ctypes
@@ -78,30 +79,33 @@ def _apply_windows_shell_identity(qt_window, icon_path: Path) -> None:
         store = propsys.SHGetPropertyStoreForWindow(
             int(qt_window.winId()), propsys.IID_IPropertyStore
         )
-        launch_command = (
-            f'"{Path(sys.executable).resolve()}" '
-            f'"{Path(__file__).resolve()}"'
-        )
+        if LAUNCHER_PATH.exists():
+            launch_command = f'"{LAUNCHER_PATH.resolve()}"'
+            icon_resource = f"{LAUNCHER_PATH.resolve()},0"
+        else:
+            launch_command = (
+                f'"{Path(sys.executable).resolve()}" '
+                f'"{Path(__file__).resolve()}"'
+            )
+            icon_resource = f"{Path(icon_path).resolve()},0"
         # Microsoft recommends setting relaunch metadata before the AppUserModelID.
         store.SetValue(
             pscon.PKEY_AppUserModel_RelaunchCommand,
-            propsys.PROPVARIANTType(launch_command, pythoncom.VT_ILLEGAL),
+            propsys.PROPVARIANTType(launch_command, pythoncom.VT_BSTR),
         )
         store.SetValue(
             pscon.PKEY_AppUserModel_RelaunchIconResource,
-            propsys.PROPVARIANTType(
-                f"{Path(icon_path).resolve()},0", pythoncom.VT_ILLEGAL
-            ),
+            propsys.PROPVARIANTType(icon_resource, pythoncom.VT_BSTR),
         )
         store.SetValue(
             pscon.PKEY_AppUserModel_ID,
-            propsys.PROPVARIANTType(APP_ID, pythoncom.VT_ILLEGAL),
+            propsys.PROPVARIANTType(APP_ID, pythoncom.VT_BSTR),
         )
         store.Commit()
         qt_window._lipiddrop_shell_identity = (
             APP_ID,
             launch_command,
-            str(Path(icon_path).resolve()),
+            icon_resource,
         )
     except Exception as error:
         # The custom Qt/native icon still applies if Windows property APIs fail.
@@ -144,7 +148,7 @@ if __name__ == "__main__":
     from napari_raman_widget.workflow_docks import tabify_workflow_docks
 
     # Use real dock tabs, not floating workflow windows. The hardware widget is
-    # the anchor; 3D LD Targeting and LD Tracking are tabified beside it.
+    # the anchor; Fixed-cell and Live lipolysis are tabified beside it.
     tabify_workflow_docks(widget, raman_dock)
 
     # Napari/Qt may update the native window during startup, so apply the native
