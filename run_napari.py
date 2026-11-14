@@ -1,4 +1,4 @@
-# run_napari.py
+﻿# run_napari.py
 """Entry point: launches napari with the CNS Raman widget docked on the right."""
 
 import os
@@ -76,7 +76,7 @@ if __name__ == "__main__":
 
     assets = WORKSPACE / "assets"
     icon_path = (
-        assets / "lipid-droplet-icon.ico"
+        assets / "lipid-droplet-taskbar.ico"
         if sys.platform == "win32"
         else assets / "lipid-droplet-icon.png"
     )
@@ -102,3 +102,4 @@ if __name__ == "__main__":
     )
 
     napari.run()
+
