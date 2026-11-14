@@ -12,8 +12,8 @@ from qtpy.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QScrollArea,
+    QTabBar,
     QVBoxLayout,
     QWidget,
 )
@@ -90,54 +90,61 @@ def show_shared_mda(owner) -> None:
 
 
 def build_control_hub(owner) -> QGroupBox:
-    """Build the compact persistent LipidDrop workflow launcher."""
+    """Build a compact tab-style launcher for the three shared workspaces."""
     box = QGroupBox("LipidDrop Control")
     layout = QVBoxLayout(box)
 
     note = QLabel(
-        "Choose a biological workflow here. Acquisition hardware, saving, "
-        "Autofocus and Run remain in Jeff's shared MDA."
+        "Choose a workspace. Jeff's shared MDA remains the only place that owns "
+        "acquisition setup, saving, Autofocus, Run and Cancel."
     )
     note.setWordWrap(True)
     note.setToolTip(
-        "The workflow buttons only show or hide Napari docks. They do not move "
+        "These tabs only show or focus existing Napari docks. They do not move "
         "the stage, galvo, objective, shutter, filter or laser."
     )
     layout.addWidget(note)
 
-    owner.open_fixed_workflow_btn = QPushButton("Open Fixed-cell Targeting")
-    owner.open_live_workflow_btn = QPushButton("Open Live Lipolysis Tracker")
-    owner.open_shared_mda_btn = QPushButton("Open Shared Raman MDA")
-
-    for button in (
-        owner.open_fixed_workflow_btn,
-        owner.open_live_workflow_btn,
-        owner.open_shared_mda_btn,
-    ):
-        button.setMinimumHeight(34)
-        layout.addWidget(button)
-
-    owner.open_fixed_workflow_btn.setToolTip(
+    owner.workflow_tabs = QTabBar()
+    owner.workflow_tabs.setDocumentMode(True)
+    owner.workflow_tabs.setExpanding(True)
+    owner.workflow_tabs.setUsesScrollButtons(False)
+    owner.workflow_tabs.setMinimumHeight(34)
+    owner.workflow_tabs.setAccessibleName("LipidDrop workspace tabs")
+    owner.workflow_tabs.addTab("Fixed-cell")
+    owner.workflow_tabs.addTab("Live lipolysis")
+    owner.workflow_tabs.addTab("Raman MDA")
+    owner.workflow_tabs.setTabToolTip(
+        0,
         "Open the fixed-cell Z-stack workflow: Acquire → Segment → Review → Target. "
-        "No hardware moves until a reviewed plan is run from shared MDA."
+        "No hardware moves until a reviewed plan is run from shared MDA.",
     )
-    owner.open_live_workflow_btn.setToolTip(
-        "Open the experimental live workflow: Baseline → Track → Analyze → Revisit."
+    owner.workflow_tabs.setTabToolTip(
+        1,
+        "Open the experimental live workflow: Baseline → Track → Analyze → Revisit.",
     )
-    owner.open_shared_mda_btn.setToolTip(
+    owner.workflow_tabs.setTabToolTip(
+        2,
         "Open Jeff's unchanged shared MDA with Time, Positions, Grid, Z Stack, "
-        "Channels, Raman selection, Autofocus, Save, Run and Cancel."
+        "Channels, Raman selection, Autofocus, Save, Run and Cancel.",
     )
 
-    owner.open_fixed_workflow_btn.clicked.connect(
-        lambda _checked=False: _show_dock(owner, "_fixed_workflow_dock")
-    )
-    owner.open_live_workflow_btn.clicked.connect(
-        lambda _checked=False: _show_dock(owner, "_live_workflow_dock")
-    )
-    owner.open_shared_mda_btn.clicked.connect(
-        lambda _checked=False: show_shared_mda(owner)
-    )
+    def open_workspace(index: int) -> None:
+        if index == 0:
+            _show_dock(owner, "_fixed_workflow_dock")
+        elif index == 1:
+            _show_dock(owner, "_live_workflow_dock")
+        elif index == 2:
+            show_shared_mda(owner)
+
+    owner.workflow_tabs.tabBarClicked.connect(open_workspace)
+    owner.workflow_tabs.setCurrentIndex(-1)
+    layout.addWidget(owner.workflow_tabs)
+
+    hint = QLabel("Click a tab to open or refocus that workspace.")
+    hint.setWordWrap(True)
+    hint.setStyleSheet("QLabel { color: palette(mid); padding-bottom: 2px; }")
+    layout.addWidget(hint)
 
     owner.lipiddrop_hub_status = QLabel()
     owner.lipiddrop_hub_status.setWordWrap(True)

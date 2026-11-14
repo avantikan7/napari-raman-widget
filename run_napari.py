@@ -18,7 +18,7 @@ for component in (
     if path not in sys.path:
         sys.path.insert(0, path)
 
-APP_ID = "avantikan7.LipidDropImaging"
+APP_ID = "avantikan7.LipidDropImaging.Adipocyte"
 
 if sys.platform == "win32":
     import ctypes
@@ -76,9 +76,9 @@ if __name__ == "__main__":
 
     assets = WORKSPACE / "assets"
     icon_path = (
-        assets / "lipid-droplet-taskbar.ico"
+        assets / "lipid-adipocyte-taskbar.ico"
         if sys.platform == "win32"
-        else assets / "lipid-droplet-icon.png"
+        else assets / "lipid-adipocyte-taskbar.png"
     )
     icon = QIcon(str(icon_path))
 

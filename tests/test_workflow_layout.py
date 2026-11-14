@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 import pytest
-from qtpy.QtWidgets import QApplication, QGroupBox, QPushButton
+from qtpy.QtWidgets import QApplication, QGroupBox, QPushButton, QTabBar
 
 
 @pytest.fixture(scope="session")
@@ -50,11 +50,17 @@ def test_lipid_workflows_are_separate_docks_and_hardware_controls_remain(qt_app)
             "4 — Revisit",
         } <= live_titles
 
-        widget.open_fixed_workflow_btn.click()
+        assert isinstance(widget.workflow_tabs, QTabBar)
+        assert [
+            widget.workflow_tabs.tabText(i)
+            for i in range(widget.workflow_tabs.count())
+        ] == ["Fixed-cell", "Live lipolysis", "Raman MDA"]
+
+        widget.workflow_tabs.tabBarClicked.emit(0)
         assert not widget._fixed_workflow_dock.isHidden()
         assert widget._live_workflow_dock.isHidden()
 
-        widget.open_live_workflow_btn.click()
+        widget.workflow_tabs.tabBarClicked.emit(1)
         assert not widget._live_workflow_dock.isHidden()
     finally:
         widget._fixed_workflow_dock.close()
